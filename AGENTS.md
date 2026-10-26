@@ -23,15 +23,16 @@ python -m unittest tests.numbers.positive_int_test.TestPositiveIntValueObject.te
 **Validation chain.** `ValueObject.__init__` (`pyvalueobjects/abstract/valueobject.py`) calls `self._validate(value)` and then stores `_value`. Every subclass overrides `_validate` and calls `super()._validate(value)` first, so constraints accumulate through inheritance:
 
 - `Int` → `PositiveOrZeroInt` → `PositiveInt`; `Int` → `NegativeOrZeroInt` → `NegativeInt`
+- `Float` → `PositiveFloat`; `Float` → `NegativeFloat` (`Float` also rejects NaN and infinities)
 - `String` → `NonEmptyString` → `Uuid4`, `Cve`, `Cpe` and the other `security/` types; `String` → `IsoDate`
 
-Type checks are strict (`type(value) != int`), so `bool` and subclasses are rejected. Conversions go through classmethods (`Int.from_str`, `Int.from_float`) that build with `cls(...)`, so they work for every `Int` subclass. Regex-based types keep a class-private compiled `__MATCHER` and raise `ValueObjectError` on mismatch.
+Type checks are strict (`type(value) != int`), so `bool` and subclasses are rejected. Conversions go through classmethods (`Int.from_str`/`from_float`, `Float.from_str`/`from_int`) that build with `cls(...)`, so they work for every subclass. Regex-based types keep a class-private compiled `__MATCHER` and raise `ValueObjectError` on mismatch.
 
 **Equality and hashing** are value-based, not type-based: `Int(1) == PositiveInt(1)` is `True`, and comparing against a non-`ValueObject` (`Int(1) == 1`) raises `ValueObjectError` instead of returning `False`.
 
 **Nullable variants.** `build_nullable(cls)` (`pyvalueobjects/abstract/nullablevalueobject.py`) returns a subclass whose `__init__` sets `_value = None` and skips validation when given `None`. Each `NullableX` lives in its own `nullable_x.py` module as `_nullable_cls = build_nullable(X)` followed by `class NullableX(_nullable_cls)` with a `value=None` default.
 
-**Lists.** `ArrayList(cls)` and `NullableArrayList(cls)` are factory functions that return a new class, used as `ArrayList(Int)([1, 2])`. Elements are validated by constructing `cls(element)` for each item.
+**Lists.** `ArrayList(cls)` and `NullableArrayList(cls)` are factory functions that return a new class, used as `ArrayList(Int)([1, 2])`. Elements are validated by constructing `cls(element)` for each item. Generated classes are cached per element type in a module-level dict, so `ArrayList(Int) is ArrayList(Int)` and `isinstance` checks work; `NullableArrayList(Int)` subclasses the cached `ArrayList(Int)`.
 
 **Public API.** Users import everything from `pyvalueobjects/__init__.py`. `nullable_positive_int.py` and `nullable_negative_int.py` import their base class via `from pyvalueobjects import ...`, which only works because `__init__.py` imports the base before the nullable variant; keep that ordering, or use full submodule imports in new code.
 
