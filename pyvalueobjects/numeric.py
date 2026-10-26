@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import operator
 import re
+import sys
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from pyvalueobjects._core import Bounded, Scalar, T, binary_op, literal, unary_op
+from pyvalueobjects._core import Bounded, OutOfRangeError, Scalar, T, binary_op, literal, show, unary_op
 
 __all__ = [
     "Int",
@@ -18,6 +19,9 @@ __all__ = [
 ]
 
 _INT_LITERAL = re.compile(r"[+-]?[0-9]+", re.ASCII)
+
+# sys.set_int_max_str_digits() refuses limits under 640 digits, and an int of at most 2126 bits has at most 640.
+_ALWAYS_PRINTABLE_BITS = 2126
 
 
 class Numeric(Bounded[T], abstract=True):
@@ -51,7 +55,11 @@ class Numeric(Bounded[T], abstract=True):
 
 
 class Int(Numeric[int]):
-    """Arbitrary-precision integer. ``bool`` is never an int; IntEnum members become plain ints."""
+    """Arbitrary-precision integer. ``bool`` is never an int; IntEnum members become plain ints.
+
+    The value must have a text form: at most ``sys.get_int_max_str_digits()`` digits (4300 by default),
+    so ``str()``, ``repr()`` and ``from_str()`` work for every Int.
+    """
 
     accepts = (int,)
     operand_types = (int,)
@@ -63,6 +71,14 @@ class Int(Numeric[int]):
 
     __floordiv__, __rfloordiv__ = binary_op(operator.floordiv), binary_op(operator.floordiv, reflected=True)
     __mod__, __rmod__ = binary_op(operator.mod), binary_op(operator.mod, reflected=True)
+
+    @classmethod
+    def _validate(cls, value: int) -> int:
+        bits = value.bit_length()
+        if bits > _ALWAYS_PRINTABLE_BITS and (limit := sys.get_int_max_str_digits()) and abs(value) >= 10**limit:
+            reason = f"must have at most {limit} digits (sys.get_int_max_str_digits()), got {show(value)}"
+            raise OutOfRangeError(reason, vo=cls, value=value)
+        return super()._validate(value)
 
     def __int__(self) -> int:
         return self._value

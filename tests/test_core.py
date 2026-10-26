@@ -13,7 +13,7 @@ import pickle
 import re
 import sys
 import unittest
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError, dataclass
 from decimal import Decimal
 from fractions import Fraction
@@ -175,15 +175,6 @@ def test_show_never_exceeds_80_characters_and_keeps_the_repr_prefix(value: objec
 
 
 HUGE = 10**5000  # 5001 digits: more than the default sys.get_int_max_str_digits() of 4300
-
-
-@pytest.fixture
-def int_digit_limit() -> Iterator[int]:
-    """Pins the int-to-str digit limit to its default, whatever PYTHONINTMAXSTRDIGITS says."""
-    before = sys.get_int_max_str_digits()
-    sys.set_int_max_str_digits(4300)
-    yield 4300
-    sys.set_int_max_str_digits(before)
 
 
 @pytest.mark.usefixtures("int_digit_limit")
