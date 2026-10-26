@@ -195,6 +195,22 @@ def _shown(value: Decimal) -> str:
     return text if len(text) <= 80 else f"{text[:77]}..."
 
 
+def _quantize(vo: type, value: Decimal, places: int, rounding: str) -> Decimal:
+    try:
+        return value.quantize(Decimal((0, (1,), -places)), rounding=rounding, context=DECIMAL_CONTEXT)
+    except InvalidOperation as exc:  # the result would need more digits than DECIMAL_CONTEXT holds
+        reason = f"too many digits for {places} decimal places, got {_shown(value)}"
+        raise OutOfRangeError(reason, vo=vo, value=value) from exc
+
+
+def quantize_exact(vo: type, value: Decimal, places: int) -> Decimal:
+    """``value`` with exactly ``places`` decimals; PrecisionError instead of rounding. Errors name ``vo``."""
+    quantized = _quantize(vo, value, places, ROUND_HALF_EVEN)
+    if quantized != value:
+        raise PrecisionError(f"more than {places} decimal places, got {_shown(value)}", vo=vo, value=value)
+    return quantized
+
+
 def _divide(dividend: Decimal | int, divisor: Decimal | int) -> Decimal:
     """DECIMAL_CONTEXT.divide, except that 0 / 0 raises ZeroDivisionError, as x / 0 does, not InvalidOperation."""
     if not divisor:
@@ -206,11 +222,13 @@ class DecimalNumber(Numeric[Decimal]):
     """Exact finite decimal that fits DECIMAL_CONTEXT (34 significant digits). Never accepts a float.
 
     Arithmetic runs in DECIMAL_CONTEXT, whatever the caller's context. ``-0`` becomes ``0``; the scale is kept
-    (``'1.10'`` prints as given and equals ``'1.1'``).
+    (``'1.10'`` prints as given and equals ``'1.1'``). ``places`` (optional) fixes the scale: more decimals
+    raise PrecisionError, never round; only ``rounded()`` rounds.
     """
 
     accepts = (Decimal, int, str)
     operand_types = (Decimal, int)
+    places: ClassVar[int | None] = None
     _parse_decimal: ClassVar[staticmethod[[str], Decimal]] = staticmethod(literal(_DECIMAL_LITERAL, _decimal))
 
     if TYPE_CHECKING:
@@ -240,7 +258,13 @@ class DecimalNumber(Numeric[Decimal]):
             raise OutOfRangeError(reason, vo=cls, value=value)
         if value.is_zero():
             value = value.copy_abs()  # no '-0'
+        if cls.places is not None:
+            value = quantize_exact(cls, value, cls.places)
         return super()._validate(value)
+
+    def rounded(self, places: int = 0, rounding: str = ROUND_HALF_EVEN) -> Self:
+        """The value rounded to ``places`` decimals (a negative ``places`` rounds to tens, hundreds...)."""
+        return type(self)(_quantize(type(self), self._value, places, rounding))
 
 
 class PositiveOrZeroDecimal(DecimalNumber):

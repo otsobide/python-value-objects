@@ -94,6 +94,7 @@ assert_type(DecimalNumber("1.5").value, Decimal)
 assert_type(DecimalNumber(1) / 3, DecimalNumber)
 assert_type(Decimal("0.5") * PositiveDecimal(2), PositiveDecimal)
 assert_type(-DecimalNumber("1.5"), DecimalNumber)
+assert_type(PositiveDecimal("2.675").rounded(2), PositiveDecimal)
 match PositiveInt(5):
     case PositiveInt(number):
         assert_type(number, int)

@@ -6,9 +6,21 @@ import decimal
 import enum
 import math
 import operator
+import re
 import sys
 from collections.abc import Callable
-from decimal import ROUND_HALF_EVEN, Decimal, DivisionByZero, InvalidOperation, Overflow
+from decimal import (
+    ROUND_05UP,
+    ROUND_CEILING,
+    ROUND_DOWN,
+    ROUND_FLOOR,
+    ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
+    Decimal,
+    DivisionByZero,
+    InvalidOperation,
+    Overflow,
+)
 from fractions import Fraction
 from typing import Any
 
@@ -36,6 +48,7 @@ from pyvalueobjects.numeric import (
     PositiveOrZeroDecimal,
     PositiveOrZeroFloat,
     PositiveOrZeroInt,
+    quantize_exact,
 )
 
 # ------------------------------------------------------------------------------------------- shared tables
@@ -122,6 +135,18 @@ class Even(Int):
 
 class EvenPercent(Even, Age):
     le = 100
+
+
+class Cents(DecimalNumber):
+    places = 2
+
+
+class Whole(DecimalNumber):
+    places = 0
+
+
+class Price(PositiveOrZeroDecimal):
+    places = 2
 
 
 # ------------------------------------------------------------------------------------------- the shared base
@@ -751,6 +776,160 @@ def test_decimal_from_str_applies_the_bounds_of_the_class(cls: type[DecimalNumbe
 def test_decimal_text_round_trips(number: Decimal) -> None:
     built = DecimalNumber(number)
     assert DecimalNumber.from_str(str(built)) == built and str(DecimalNumber(str(built))) == str(built)
+
+
+# ------------------------------------------------------------------------------------------- DecimalNumber: places and rounding
+
+
+@pytest.mark.parametrize(
+    ("value", "places", "text"),
+    [
+        (Decimal("1.5"), 2, "1.50"),
+        (Decimal("1.500"), 2, "1.50"),
+        (Decimal("-7"), 3, "-7.000"),
+        (Decimal("1.2E+3"), 0, "1200"),
+        (Decimal("1200"), -2, "1.2E+3"),
+        (Decimal("1E+31"), 2, "1" + "0" * 31 + ".00"),  # 34 digits: the most DECIMAL_CONTEXT holds
+    ],
+)
+def test_quantize_exact_sets_the_scale_without_changing_the_value(value: Decimal, places: int, text: str) -> None:
+    quantized = quantize_exact(Age, value, places)
+    assert str(quantized) == text and quantized == value
+
+
+@pytest.mark.parametrize(
+    ("value", "places", "error", "reason"),
+    [
+        (Decimal("1.505"), 2, PrecisionError, "more than 2 decimal places, got 1.505"),
+        (Decimal("0.5"), 0, PrecisionError, "more than 0 decimal places, got 0.5"),
+        (Decimal("1E+32"), 2, OutOfRangeError, "too many digits for 2 decimal places, got 1E+32"),
+    ],
+)
+def test_quantize_exact_never_rounds(value: Decimal, places: int, error: type, reason: str) -> None:
+    with pytest.raises(error) as info:
+        quantize_exact(Age, value, places)
+    assert type(info.value) is error and info.value.reason == reason and info.value.vo is Age
+    assert info.value.value == value
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "text"),
+    [
+        (Cents, "1.5", "1.50"),
+        (Cents, 7, "7.00"),
+        (Cents, Decimal("1.500"), "1.50"),
+        (Cents, "1e-2", "0.01"),
+        (Cents, "-0.00", "0.00"),
+        (Whole, "12.0", "12"),
+        (Whole, "12E+1", "120"),
+        (Price, "0", "0.00"),
+    ],
+)
+def test_places_fixes_the_scale(cls: type[DecimalNumber], raw: Any, text: str) -> None:
+    number = cls(raw)
+    assert str(number) == text and cls.from_str(text) == number and repr(number) == f"{cls.__name__}({text!r})"
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "error", "message"),
+    [
+        (Cents, "1.505", PrecisionError, "Cents: more than 2 decimal places, got 1.505"),
+        (Whole, "0.5", PrecisionError, "Whole: more than 0 decimal places, got 0.5"),
+        (Cents, "1e32", OutOfRangeError, "Cents: too many digits for 2 decimal places, got 1E+32"),
+        (Price, "-0.001", PrecisionError, "Price: more than 2 decimal places, got -0.001"),  # before the bounds
+        (Price, "-0.01", OutOfRangeError, "Price: value must be >= 0, got Decimal('-0.01')"),
+    ],
+)
+def test_places_refuses_more_decimals(cls: type[DecimalNumber], raw: str, error: type, message: str) -> None:
+    with pytest.raises(error) as info:
+        cls(raw)
+    assert type(info.value) is error and str(info.value) == message
+
+
+@pytest.mark.parametrize(
+    ("expression", "text"),
+    [
+        ("Cents('2.50') * 3", "7.50"),
+        ("Cents('1.00') / 4", "0.25"),
+        ("Cents('0.10') * Decimal('0.5')", "0.05"),
+        ("Cents('1.5') - Cents('0.25')", "1.25"),
+        ("-Cents('0.5')", "-0.50"),
+    ],
+)
+def test_places_holds_after_every_operation(expression: str, text: str) -> None:
+    result = compute(expression)
+    assert type(result) is Cents and str(result) == text
+
+
+@pytest.mark.parametrize(
+    ("expression", "message"),
+    [
+        ("Cents('1.00') / 3", "Cents: more than 2 decimal places, got 0.3333333333333333333333333333333333"),
+        ("Cents('0.05') * Decimal('0.5')", "Cents: more than 2 decimal places, got 0.025"),
+        ("Cents('1.25') + Decimal('0.001')", "Cents: more than 2 decimal places, got 1.251"),
+    ],
+)
+def test_an_operation_never_rounds_to_the_places(expression: str, message: str) -> None:
+    with pytest.raises(PrecisionError, match=f"^{re.escape(message)}$"):
+        compute(expression)
+
+
+ROUNDINGS = [
+    ("2.675", 2, ROUND_HALF_EVEN, "2.68"),
+    ("2.665", 2, ROUND_HALF_EVEN, "2.66"),
+    ("2.5", 0, ROUND_HALF_EVEN, "2"),
+    ("3.5", 0, ROUND_HALF_EVEN, "4"),
+    ("-2.5", 0, ROUND_HALF_EVEN, "-2"),
+    ("-0.4", 0, ROUND_HALF_EVEN, "0"),
+    ("1.2", 3, ROUND_HALF_EVEN, "1.200"),
+    ("1234.5", -2, ROUND_HALF_EVEN, "1.2E+3"),
+    ("2.665", 2, ROUND_HALF_UP, "2.67"),
+    ("2.669", 2, ROUND_DOWN, "2.66"),
+    ("-2.661", 2, ROUND_FLOOR, "-2.67"),
+    ("2.661", 2, ROUND_CEILING, "2.67"),
+    ("0.05", 1, ROUND_05UP, "0.1"),
+]
+
+
+@pytest.mark.parametrize(("raw", "places", "rounding", "text"), ROUNDINGS)
+def test_rounded_quantizes_with_the_given_rounding(raw: str, places: int, rounding: str, text: str) -> None:
+    assert str(DecimalNumber(raw).rounded(places, rounding)) == text
+
+
+def test_rounded_defaults_to_whole_numbers_half_even() -> None:
+    assert str(DecimalNumber("2.5").rounded()) == "2" and str(DecimalNumber("0.5000001").rounded()) == "1"
+
+
+@pytest.mark.parametrize(
+    ("number", "places", "expected"),
+    [
+        (PositiveDecimal("2.5"), 0, PositiveDecimal(2)),
+        (Cents("1.25"), 1, Cents("1.20")),
+        (Cents("1.25"), 3, Cents("1.25")),  # finer than places: the class quantizes back to its own scale
+        (Price("9.99"), 0, Price(10)),
+    ],
+)
+def test_rounded_keeps_the_class(number: DecimalNumber, places: int, expected: DecimalNumber) -> None:
+    result = number.rounded(places)
+    assert result == expected and type(result) is type(expected) and str(result) == str(expected)
+
+
+@pytest.mark.parametrize(
+    ("compute_rounded", "error", "message"),
+    [
+        (lambda: PositiveDecimal("0.4").rounded(), OutOfRangeError, "PositiveDecimal: value must be > 0, got Decimal('0')"),
+        (lambda: DecimalNumber("1e33").rounded(2), OutOfRangeError, "DecimalNumber: too many digits for 2 decimal places, got 1E+33"),
+    ],
+)  # fmt: skip
+def test_rounded_results_are_validated_again(compute_rounded: Callable[[], Any], error: type, message: str) -> None:
+    with pytest.raises(error) as info:
+        compute_rounded()
+    assert type(info.value) is error and str(info.value) == message
+
+
+def test_rounded_refuses_an_unknown_rounding_mode() -> None:
+    with pytest.raises(TypeError, match="valid values for rounding are"):
+        DecimalNumber("1.5").rounded(0, "ROUND_SOMETIMES")
 
 
 # ------------------------------------------------------------------------------------------- arithmetic
