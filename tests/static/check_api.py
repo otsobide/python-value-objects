@@ -9,7 +9,7 @@ from typing import assert_type
 
 from pyvalueobjects import Bounded, InvalidTypeError, Scalar, Sized, ValueObject, ValueObjectError
 from pyvalueobjects._core import binary_op, literal, unary_op
-from pyvalueobjects.numeric import DecimalNumber, Float, Int, PositiveDecimal, PositiveFloat, PositiveInt
+from pyvalueobjects.numeric import DecimalNumber, Float, Int, Percentage, PositiveDecimal, PositiveFloat, PositiveInt
 
 
 class Code(Scalar[str]):
@@ -95,6 +95,10 @@ assert_type(DecimalNumber(1) / 3, DecimalNumber)
 assert_type(Decimal("0.5") * PositiveDecimal(2), PositiveDecimal)
 assert_type(-DecimalNumber("1.5"), DecimalNumber)
 assert_type(PositiveDecimal("2.675").rounded(2), PositiveDecimal)
+assert_type(Percentage("10").ratio, Decimal)
+assert_type(Percentage("10").of(Decimal(1)), Decimal)
+assert_type(Percentage("10").of(PositiveDecimal(5)), PositiveDecimal)
+assert_type(Percentage("10") + 5, Percentage)
 match PositiveInt(5):
     case PositiveInt(number):
         assert_type(number, int)
@@ -102,3 +106,4 @@ match PositiveInt(5):
 PositiveInt("5")  # type: ignore[arg-type]  # must stay rejected
 Float("1.5")  # type: ignore[arg-type]
 DecimalNumber(1.5)  # type: ignore[arg-type]
+Percentage("10").of(1.5)  # type: ignore[type-var]

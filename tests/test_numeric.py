@@ -29,7 +29,15 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from pyvalueobjects import numeric
-from pyvalueobjects._core import Bounded, InvalidFormatError, InvalidTypeError, OutOfRangeError, PrecisionError, show
+from pyvalueobjects._core import (
+    Bounded,
+    InvalidFormatError,
+    InvalidTypeError,
+    OutOfRangeError,
+    PrecisionError,
+    ValueObjectError,
+    show,
+)
 from pyvalueobjects.numeric import (
     DECIMAL_CONTEXT,
     DecimalNumber,
@@ -42,6 +50,7 @@ from pyvalueobjects.numeric import (
     NegativeOrZeroFloat,
     NegativeOrZeroInt,
     Numeric,
+    Percentage,
     PositiveDecimal,
     PositiveFloat,
     PositiveInt,
@@ -958,6 +967,122 @@ def test_rounded_refuses_an_unknown_rounding_mode() -> None:
         DecimalNumber("1.5").rounded(0, "ROUND_SOMETIMES")
 
 
+# ------------------------------------------------------------------------------------------- Percentage
+
+EXACT = decimal.Context(prec=100)  # an independent oracle: these products are exact in 100 digits
+
+
+@pytest.mark.parametrize("raw", [0, 100, "0.001", "12.5", Decimal("99.999"), "-0", "1e2", Int(50)])
+def test_percentage_runs_from_0_to_100_inclusive(raw: Any) -> None:
+    assert 0 <= Percentage(raw).value <= 100 and issubclass(Percentage, DecimalNumber)
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ("-0.1", "Percentage: value must be >= 0, got Decimal('-0.1')"),
+        ("100.01", "Percentage: value must be <= 100, got Decimal('100.01')"),
+        (101, "Percentage: value must be <= 100, got Decimal('101')"),
+        ("1E+3", "Percentage: value must be <= 100, got Decimal('1E+3')"),
+    ],
+)
+def test_percentage_refuses_values_outside_0_to_100(raw: Any, message: str) -> None:
+    with pytest.raises(OutOfRangeError) as info:
+        Percentage(raw)
+    assert str(info.value) == message
+
+
+@pytest.mark.parametrize(
+    ("raw", "ratio"),
+    [
+        (21, "0.21"),
+        ("12.5", "0.125"),
+        (100, "1.00"),
+        (0, "0.00"),
+        ("0.001", "0.00001"),
+        ("33.3333333333", "0.333333333333"),
+        ("99." + "9" * 32, "0.99" + "9" * 32),  # 34 digits, still exact
+    ],
+)
+def test_ratio_is_the_exact_fraction(raw: Any, ratio: str) -> None:
+    value = Percentage(raw).ratio
+    assert str(value) == ratio and type(value) is Decimal and value == EXACT.divide(Decimal(raw), 100)
+
+
+@pytest.mark.parametrize(
+    ("percent", "amount"),
+    [(21, Decimal("200")), ("12.345", Decimal("1234.5")), ("0.001", Decimal("-7")), (100, Decimal("1.50")), (0, 5)],
+)
+def test_of_a_decimal_or_an_int_is_an_exact_decimal(percent: Any, amount: Decimal | int) -> None:
+    """Computed in DECIMAL_CONTEXT: the autouse hostile context would cut 152.399025 to 152."""
+    result = Percentage(percent).of(amount)
+    assert type(result) is Decimal and result == EXACT.multiply(amount, EXACT.divide(Decimal(percent), 100))
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected", "text"),
+    [
+        ("Percentage(50).of(DecimalNumber(3))", DecimalNumber("1.5"), "1.50"),
+        ("Percentage(10).of(PositiveDecimal(5))", PositiveDecimal("0.5"), "0.50"),
+        ("Percentage('12.5').of(Cents('10.00'))", Cents("1.25"), "1.25"),
+        ("Percentage(50).of(Percentage(50))", Percentage(25), "25.00"),
+    ],
+)
+def test_of_a_value_object_keeps_its_type(expression: str, expected: DecimalNumber, text: str) -> None:
+    result = compute(expression)
+    assert result == expected and type(result) is type(expected) and str(result) == text
+
+
+@pytest.mark.parametrize(
+    ("expression", "error", "message"),
+    [
+        ("Percentage(0).of(PositiveDecimal(5))", OutOfRangeError, "PositiveDecimal: value must be > 0, got Decimal('0.00')"),
+        ("Percentage('12.5').of(Cents('0.10'))", PrecisionError, "Cents: more than 2 decimal places, got 0.01250"),
+    ],
+)  # fmt: skip
+def test_of_validates_the_result_as_its_type(expression: str, error: type, message: str) -> None:
+    with pytest.raises(error) as info:
+        compute(expression)
+    assert type(info.value) is error and str(info.value) == message
+
+
+@pytest.mark.parametrize(
+    ("amount", "message"),
+    [
+        (1.5, "Percentage.of() takes a value object, a Decimal or an int, got float"),
+        (True, "Percentage.of() takes a value object, a Decimal or an int, got bool"),
+        (Signal.UP, "Percentage.of() takes a value object, a Decimal or an int, got Signal"),
+        ("100", "Percentage.of() takes a value object, a Decimal or an int, got str"),
+        (Fraction(1, 2), "Percentage.of() takes a value object, a Decimal or an int, got Fraction"),
+        (Float(1.5), "unsupported operand type(s) for *: 'Float' and 'decimal.Decimal'"),
+        (Int(5), "unsupported operand type(s) for *: 'Int' and 'decimal.Decimal'"),
+    ],
+)
+def test_of_refuses_floats_and_values_that_do_not_scale_by_a_decimal(amount: Any, message: str) -> None:
+    with pytest.raises(TypeError) as info:
+        Percentage(5).of(amount)
+    assert str(info.value) == message and not isinstance(info.value, ValueObjectError)
+
+
+class Discount(Percentage):
+    le = 50
+    places = 0
+
+
+@pytest.mark.parametrize(
+    ("raw", "error", "message"),
+    [
+        ("51", OutOfRangeError, "Discount: value must be <= 50, got Decimal('51')"),
+        ("12.5", PrecisionError, "Discount: more than 0 decimal places, got 12.5"),
+    ],
+)
+def test_percentage_subclasses_narrow_the_range(raw: str, error: type, message: str) -> None:
+    with pytest.raises(error) as info:
+        Discount(raw)
+    assert type(info.value) is error and str(info.value) == message
+    assert Discount("20.0").of(Decimal(80)) == Decimal(16) and str(Discount("20.0")) == "20"
+
+
 # ------------------------------------------------------------------------------------------- arithmetic
 
 
@@ -1005,6 +1130,8 @@ ARITHMETIC = [
     ("1 / DecimalNumber(4)", DecimalNumber("0.25")),
     ("-NegativeOrZeroDecimal(0)", NegativeOrZeroDecimal(0)),
     ("abs(DecimalNumber('-2.5'))", DecimalNumber("2.5")),
+    ("Percentage(50) + 10", Percentage(60)),
+    ("Percentage(50) / 2", Percentage(25)),
 ]
 # (expression, str() of the result): exact digits and scale, computed in DECIMAL_CONTEXT under the hostile context
 DECIMAL_RESULTS = [
@@ -1043,6 +1170,9 @@ REVALIDATED = [
     ("NegativeDecimal('-1') * 0", "NegativeDecimal: value must be < 0, got Decimal('0')"),
     ("DecimalNumber('9E+999999') * 10", "DecimalNumber: result out of range: decimal overflow"),
     ("10 * DecimalNumber('-9E+999999')", "DecimalNumber: result out of range: decimal overflow"),
+    ("Percentage(50) + Percentage(60)", "Percentage: value must be <= 100, got Decimal('110')"),
+    ("Percentage(10) - Percentage(20)", "Percentage: value must be >= 0, got Decimal('-10')"),
+    ("-Percentage(5)", "Percentage: value must be >= 0, got Decimal('-5')"),
 ]
 # (left, symbol, right): a VO of another type, bool, or a raw type outside operand_types is never an operand
 NOT_OPERANDS = [
@@ -1079,6 +1209,8 @@ NOT_OPERANDS = [
     (DecimalNumber(1), "/", "2"),
     (DecimalNumber(7), "//", 2),
     (DecimalNumber(7), "%", 2),
+    (Percentage(5), "+", DecimalNumber(5)),
+    (DecimalNumber(5), "*", Percentage(5)),
 ]
 
 

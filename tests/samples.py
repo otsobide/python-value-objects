@@ -73,4 +73,11 @@ SAMPLES: list[Sample] = [
     Sample(numeric.PositiveDecimal, ["0.01", 7], invalid=["0", "-0", "-1"], wrong_type=NOT_DECIMAL),
     Sample(numeric.NegativeOrZeroDecimal, ["0", "-1.5"], invalid=["0.01"], wrong_type=NOT_DECIMAL),
     Sample(numeric.NegativeDecimal, ["-0.01", -7], invalid=["0", "-0.00", "1"], wrong_type=NOT_DECIMAL),
+    Sample(
+        numeric.Percentage,
+        [0, "21", "100", "12.5", Decimal("0.001")],
+        invalid=["-0.1", "100.01", 101, "21%"],
+        wrong_type=NOT_DECIMAL,
+        normalized=[("12.50", "12.50"), ("-0", "0"), (" 1e2 ", "1E+2")],
+    ),
 ]

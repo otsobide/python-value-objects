@@ -1,4 +1,4 @@
-"""Numbers: the Int, Float and DecimalNumber families, on the shared Numeric base."""
+"""Numbers: the Int, Float and DecimalNumber families on the shared Numeric base, and Percentage."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import operator
 import re
 import sys
 from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow, localcontext
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Protocol, Self, TypeVar, cast
 
 from pyvalueobjects._core import (
     Bounded,
@@ -15,6 +15,7 @@ from pyvalueobjects._core import (
     PrecisionError,
     Scalar,
     T,
+    ValueObject,
     binary_op,
     literal,
     show,
@@ -33,6 +34,7 @@ __all__ = [
     "NegativeOrZeroFloat",
     "NegativeOrZeroInt",
     "Numeric",
+    "Percentage",
     "PositiveDecimal",
     "PositiveFloat",
     "PositiveInt",
@@ -288,3 +290,32 @@ class NegativeOrZeroDecimal(DecimalNumber):
 
 class NegativeDecimal(NegativeOrZeroDecimal):
     lt = 0
+
+
+class _ScalesByDecimal(Protocol):
+    def __mul__(self, factor: Decimal, /) -> Self: ...
+
+
+_M = TypeVar("_M", bound=_ScalesByDecimal)
+
+
+class Percentage(DecimalNumber):
+    """0 to 100 inclusive. ``ratio`` is the exact fraction; ``of()`` scales an amount by it."""
+
+    ge = 0
+    le = 100
+
+    @property
+    def ratio(self) -> Decimal:
+        """The value divided by 100, exactly: ``Percentage("12.5").ratio == Decimal("0.125")``."""
+        return self._value.scaleb(-2, DECIMAL_CONTEXT)
+
+    def of(self, amount: _M) -> _M:
+        """``amount * ratio``. A value object (a DecimalNumber, Money) multiplies with its own operator and keeps
+        its type; a Decimal or an int gives a Decimal computed in DECIMAL_CONTEXT. Anything else is a TypeError."""
+        if isinstance(amount, ValueObject):
+            return amount * self.ratio
+        number: object = amount  # an int is no _ScalesByDecimal for mypy, but a valid amount at runtime
+        if isinstance(number, Decimal) or type(number) is int:
+            return cast("_M", DECIMAL_CONTEXT.multiply(number, self.ratio))
+        raise TypeError(f"Percentage.of() takes a value object, a Decimal or an int, got {type(amount).__name__}")
