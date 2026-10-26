@@ -37,9 +37,11 @@ from pyvalueobjects._core import (
     ValueObject,
     ValueObjectError,
     ValueObjectMeta,
+    binary_op,
     check_range,
     literal,
     show,
+    unary_op,
 )
 
 PROTOCOLS = range(pickle.HIGHEST_PROTOCOL + 1)
@@ -1468,3 +1470,167 @@ def test_sized_is_valid_agrees_with_the_length(text: str) -> None:
 def test_constraint_bases_are_abstract(cls: type[Scalar[Any]]) -> None:
     with pytest.raises(TypeError, match=f"^{cls.__name__} is abstract"):
         cls(1)
+
+
+# ------------------------------------------------------------------------------------------- binary_op / unary_op
+
+
+class Units(Bounded[int]):
+    accepts = (int,)
+    operand_types = (int,)
+    __add__ = binary_op(operator.add)
+    __radd__ = binary_op(operator.add, reflected=True)
+    __sub__ = binary_op(operator.sub)
+    __rsub__ = binary_op(operator.sub, reflected=True)
+    __mul__ = binary_op(operator.mul)
+    __floordiv__ = binary_op(operator.floordiv)
+    __neg__ = unary_op(operator.neg)
+    __pos__ = unary_op(operator.pos)
+    __abs__ = unary_op(abs)
+
+
+class PositiveUnits(Units):
+    gt = 0
+
+
+class Real(Scalar[float]):
+    accepts = (float, int)
+    operand_types = (float, int)
+    __pow__ = binary_op(operator.pow)
+
+    @classmethod
+    def _convert(cls, raw: float) -> float:
+        return float(raw)
+
+
+class Span(Scalar[datetime.timedelta]):
+    accepts = (datetime.timedelta,)
+    operand_types = (datetime.timedelta,)
+    __add__ = binary_op(operator.add)
+    __mul__ = binary_op(operator.mul, operands=(int,), same_type=False)  # Span * count only
+    __neg__ = unary_op(operator.neg)
+    __abs__ = unary_op(abs)
+
+
+class Tally(Scalar[int]):
+    """No operand_types: only another Tally is a valid operand."""
+
+    accepts = (int,)
+    __add__ = binary_op(operator.add)
+
+
+DAY = datetime.timedelta(days=1)
+
+
+@pytest.mark.parametrize(
+    ("compute", "expected"),
+    [
+        (lambda: Units(3) + Units(2), Units(5)),
+        (lambda: Units(3) + 2, Units(5)),
+        (lambda: 2 + Units(3), Units(5)),  # a raw value on the left still gives the VO type
+        (lambda: Units(3) - 10, Units(-7)),
+        (lambda: 10 - Units(3), Units(7)),  # reflected operands keep their order
+        (lambda: Units(-4) * Units(3), Units(-12)),
+        (lambda: Units(7) // 2, Units(3)),
+        (lambda: Units(-7) // Units(2), Units(-4)),
+        (lambda: PositiveUnits(3) + 2, PositiveUnits(5)),  # the left operand's concrete type
+        (lambda: 2 + PositiveUnits(3), PositiveUnits(5)),
+        (lambda: -Units(3), Units(-3)),
+        (lambda: +Units(3), Units(3)),
+        (lambda: abs(Units(-3)), Units(3)),
+        (lambda: abs(PositiveUnits(3)), PositiveUnits(3)),
+        (lambda: Real(2) ** 0.5, Real(2**0.5)),
+        (lambda: Span(DAY) + Span(DAY), Span(2 * DAY)),
+        (lambda: Span(DAY) * 3, Span(3 * DAY)),
+        (lambda: -Span(DAY), Span(-DAY)),
+        (lambda: Tally(1) + Tally(2), Tally(3)),
+    ],
+)
+def test_operators_build_the_left_operand_type(compute: Callable[[], Scalar[Any]], expected: Scalar[Any]) -> None:
+    result = compute()
+    assert result == expected and type(result) is type(expected)
+
+
+@pytest.mark.parametrize(
+    ("compute", "message"),
+    [
+        (lambda: PositiveUnits(1) - PositiveUnits(5), "PositiveUnits: value must be > 0, got -4"),
+        (lambda: PositiveUnits(1) - 1, "PositiveUnits: value must be > 0, got 0"),
+        (lambda: 1 - PositiveUnits(1), "PositiveUnits: value must be > 0, got 0"),
+        (lambda: -PositiveUnits(1), "PositiveUnits: value must be > 0, got -1"),
+    ],
+)
+def test_results_are_validated_again(compute: Callable[[], Scalar[Any]], message: str) -> None:
+    with pytest.raises(OutOfRangeError) as info:
+        compute()
+    assert str(info.value) == message and info.value.vo is PositiveUnits
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "symbol"),
+    [
+        (Units(1), 1.5, "+"),  # a type outside operand_types
+        (Units(1), True, "+"),  # operand types are exact: bool is not int
+        (Units(1), "1", "+"),
+        (Units(1), Decimal(1), "+"),
+        (Units(1), PositiveUnits(1), "+"),  # parent, child and sibling VOs do not mix
+        (PositiveUnits(1), Units(1), "+"),
+        (Units(1), Tally(1), "+"),
+        (1.5, Units(1), "+"),
+        (Units(1), None, "-"),
+        (Span(DAY), Span(DAY), "*"),  # same_type=False
+        (Span(DAY), DAY, "*"),  # explicit operands replace operand_types
+        (Span(DAY), 2.5, "*"),
+        (Span(DAY), 1, "+"),
+        (Tally(1), 1, "+"),  # no operand_types: raw values are refused
+    ],
+)
+def test_other_operands_are_a_type_error(left: object, right: object, symbol: str) -> None:
+    with pytest.raises(TypeError, match=re.escape(f"unsupported operand type(s) for {symbol}:")) as info:
+        eval(f"left {symbol} right", {"left": left, "right": right})
+    assert not isinstance(info.value, ValueObjectError)
+
+
+@pytest.mark.parametrize("divisor", [0, Units(0)])
+def test_division_by_zero_propagates(divisor: object) -> None:
+    with pytest.raises(ZeroDivisionError):
+        _ = Units(1) // divisor  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    ("compute", "vo", "value"),
+    [
+        (lambda: Span(datetime.timedelta.max) + DAY, Span, (Span(datetime.timedelta.max), DAY)),
+        (lambda: Span(datetime.timedelta.max) * 2, Span, (Span(datetime.timedelta.max), 2)),
+        (lambda: Real(1e308) ** 2, Real, (Real(1e308), 2)),
+        (lambda: -Span(datetime.timedelta.max), Span, Span(datetime.timedelta.max)),
+    ],
+)
+def test_overflow_becomes_out_of_range_error(compute: Callable[[], Scalar[Any]], vo: type, value: object) -> None:
+    with pytest.raises(OutOfRangeError, match=f"^{vo.__name__}: result out of range: ") as info:
+        compute()
+    assert info.value.vo is vo and info.value.value == value and type(info.value.__cause__) is OverflowError
+
+
+def test_in_place_operators_rebind_and_never_mutate() -> None:
+    total = original = Units(1)
+    total += 2
+    total *= Units(3)
+    assert total == Units(9) and original == Units(1) and original.value == 1
+
+
+@given(st.integers(), st.integers())
+def test_units_arithmetic_matches_int_arithmetic(a: int, b: int) -> None:
+    assert (Units(a) + b).value == a + b == (b + Units(a)).value
+    assert (Units(a) - Units(b)).value == a - b and (a - Units(b)).value == a - b
+    assert (Units(a) * Units(b)).value == a * b and (-Units(a)).value == -a and abs(Units(a)).value == abs(a)
+
+
+@given(st.integers(1, 10**6), st.integers(1, 10**6))
+def test_positive_subtraction_raises_exactly_when_not_positive(a: int, b: int) -> None:
+    try:
+        result = PositiveUnits(a) - PositiveUnits(b)
+    except OutOfRangeError:
+        assert a - b <= 0
+    else:
+        assert result.value == a - b > 0

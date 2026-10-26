@@ -27,6 +27,7 @@ __all__ = [
 T = TypeVar("T")
 R = TypeVar("R")
 V = TypeVar("V", bound="ValueObject")
+S = TypeVar("S", bound="Scalar[Any]")
 
 
 # ----------------------------------------------------------------------------------------------- errors
@@ -385,3 +386,47 @@ def literal(regex: re.Pattern[str], convert: Callable[[str], R]) -> Callable[[st
         return convert(text)
 
     return parse
+
+
+def binary_op(
+    func: Callable[[Any, Any], Any],
+    *,
+    reflected: bool = False,
+    operands: tuple[type, ...] | None = None,
+    same_type: bool = True,
+) -> Callable[[S, object], S]:
+    """Build an operator method whose result is ``type(self)(func(a, b))``, so it is re-validated.
+
+    The other operand may be the same concrete type (when ``same_type``) or a raw value whose exact
+    type is in ``operands`` (default: the class's ``operand_types``, or none). Anything else returns
+    NotImplemented, so mixing VO types is a TypeError. Overflow becomes OutOfRangeError.
+    """
+
+    def method(self: S, other: object) -> S:
+        allowed = getattr(type(self), "operand_types", ()) if operands is None else operands
+        if same_type and type(other) is type(self):
+            operand = other._value
+        elif type(other) in allowed:
+            operand = other
+        else:
+            return NotImplemented  # type: ignore[no-any-return]
+        try:
+            result = func(operand, self._value) if reflected else func(self._value, operand)
+        except OverflowError as exc:  # date/timedelta/float overflow
+            raise OutOfRangeError(f"result out of range: {exc}", vo=type(self), value=(self, other)) from exc
+        return type(self)(result)
+
+    return method
+
+
+def unary_op(func: Callable[[Any], Any]) -> Callable[[S], S]:
+    """Build a unary operator method whose result is ``type(self)(func(value))``, re-validated like binary_op."""
+
+    def method(self: S) -> S:
+        try:
+            result = func(self._value)
+        except OverflowError as exc:  # -timedelta.max
+            raise OutOfRangeError(f"result out of range: {exc}", vo=type(self), value=self) from exc
+        return type(self)(result)
+
+    return method
