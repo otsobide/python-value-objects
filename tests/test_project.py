@@ -594,23 +594,56 @@ def test_make_cov_measures_branch_coverage_of_the_package() -> None:
     assert run["source"] == ["pyvalueobjects"]
 
 
-def test_coverage_reports_every_module_of_the_package(tmp_path: Path) -> None:
-    """Modules that nothing imports count as uncovered, also inside a subpackage without __init__.py.
+COVERAGE_OMIT = PYPROJECT["tool"]["coverage"]["run"].get("omit", [])
 
-    The 0.x security subpackage has none, so its 14 never-imported modules were missing and the total
-    read 98 % instead of 69 % (#39 review).
-    """
-    stub, report = tmp_path / "stub.py", tmp_path / "coverage.json"
-    stub.write_text("import pyvalueobjects\n", encoding="utf-8")
+
+def coverage(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run coverage with this pyproject.toml from ROOT, keeping its data file in tmp_path."""
     env = {**os.environ, "COVERAGE_FILE": str(tmp_path / ".coverage")}
-    for args in (["run", str(stub)], ["json", "--fail-under=0", "-o", str(report)]):
-        run = subprocess.run(
-            [sys.executable, "-m", "coverage", *args], cwd=ROOT, env=env, capture_output=True, text=True, check=False
-        )
-        assert run.returncode == 0, run.stdout + run.stderr
-    omit = PYPROJECT["tool"]["coverage"]["run"].get("omit", [])
+    return subprocess.run(
+        [sys.executable, "-m", "coverage", *args], cwd=ROOT, env=env, capture_output=True, text=True, check=False
+    )
+
+
+def coverage_of_an_import(tmp_path: Path) -> None:
+    """Coverage data for a script that only imports the package."""
+    stub = tmp_path / "stub.py"
+    stub.write_text("import pyvalueobjects\n", encoding="utf-8")
+    run = coverage(tmp_path, "run", str(stub))
+    assert run.returncode == 0, run.stdout + run.stderr
+
+
+def test_coverage_gate_is_100_percent() -> None:
+    """From B2 (#40) on, every line and branch of the 1.0 code is covered; the 0.x code is omitted until deleted."""
+    assert PYPROJECT["tool"]["coverage"]["report"]["fail_under"] == 100
+    assert COVERAGE_OMIT == ["pyvalueobjects/_legacy/*"]
+
+
+@pytest.mark.parametrize("pattern", COVERAGE_OMIT)
+def test_coverage_omits_only_existing_legacy_code(pattern: str) -> None:
+    """A stale omission would silently exempt whatever later lands at that path."""
+    assert pattern.endswith("/*") and (ROOT / pattern.removesuffix("/*")).is_dir()
+
+
+def test_coverage_gate_fails_when_code_is_not_covered(tmp_path: Path) -> None:
+    coverage_of_an_import(tmp_path)
+    run = coverage(tmp_path, "report")
+    assert run.returncode == 2, run.stdout + run.stderr
+    assert "is less than fail-under=100" in run.stdout + run.stderr
+
+
+def test_coverage_reports_every_module_of_the_package(tmp_path: Path) -> None:
+    """Modules that nothing imports count as uncovered instead of being left out of the report.
+
+    The 0.x security subpackage had no __init__.py, so its 14 never-imported modules were missing and
+    the total read 98 % instead of 69 % (#39 review).
+    """
+    report = tmp_path / "coverage.json"
+    coverage_of_an_import(tmp_path)
+    run = coverage(tmp_path, "json", "--fail-under=0", "-o", str(report))
+    assert run.returncode == 0, run.stdout + run.stderr
     modules = {path.relative_to(ROOT).as_posix() for path in (ROOT / "pyvalueobjects").rglob("*.py")}
-    expected = {module for module in modules if not any(fnmatch.fnmatch(module, pattern) for pattern in omit)}
+    expected = {module for module in modules if not any(fnmatch.fnmatch(module, p) for p in COVERAGE_OMIT)}
     assert set(json.loads(report.read_text(encoding="utf-8"))["files"]) == expected
 
 

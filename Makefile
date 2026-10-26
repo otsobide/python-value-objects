@@ -5,7 +5,7 @@ install:          ## create .venv with the dev group
 	uv sync
 test:
 	uv run pytest
-cov:              ## branch coverage of pyvalueobjects/
+cov:              ## branch coverage of pyvalueobjects/; fails under 100 %
 	uv run pytest --cov --cov-report=term-missing
 lint:
 	uv run ruff check .

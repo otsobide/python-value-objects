@@ -17,7 +17,7 @@ make check                                           # the default goal: lint, t
 make lint                                            # ruff check + ruff format --check
 make format                                          # ruff check --fix + ruff format
 make typecheck                                       # mypy --strict on pyvalueobjects/ and tests/static/
-make cov                                             # the suite with branch coverage
+make cov                                             # the suite with branch coverage; fails under 100 %
 make build                                           # sdist and wheel in dist/
 make clean                                           # removes build outputs and tool caches
 ```
@@ -25,7 +25,7 @@ make clean                                           # removes build outputs and
 - pytest collects the new `test_*.py` modules and the 0.x unittest modules named `*_test.py`. Plain pytest discovery finds both patterns; only `python -m unittest discover` needs `-p '*_test.py'`. Every test directory needs an `__init__.py`, so pytest imports its modules as `tests.<dir>.<module>`.
 - Run the tests from the repository root. Until the 0.x number tests are deleted, the legacy `tests/numbers` package shadows the stdlib `numbers` module whenever `tests/` itself is on `sys.path`, and `decimal` then fails to import: `cd tests && python -m pytest` breaks, and `unittest discover -s tests` needs `-t .`.
 - Warnings are errors. The one exception is a transitional filter for the invalid escape sequences in the legacy `cpe.py`.
-- ruff and strict mypy skip the 0.x code (`extend-exclude` for ruff, `exclude` plus `ignore_errors` overrides for mypy, all in `pyproject.toml`). New code must pass `make lint typecheck`. The coverage gate stays at 0 % until the 1.0 core lands.
+- ruff and strict mypy skip the 0.x code (`extend-exclude` for ruff, `exclude` plus `ignore_errors` overrides for mypy, all in `pyproject.toml`). New code must pass `make lint typecheck`, and `make cov` fails under 100 % line and branch coverage of `pyvalueobjects/`, which omits the 0.x code until it is deleted.
 - CI (`.github/workflows/tests.yml`) runs `uv sync --locked` and `uv run pytest --cov` on Python 3.11–3.15, plus a quality job on 3.11 that runs lint and mypy, builds and `twine check`s the package, and installs the wheel alone. Code must stay 3.11-compatible. After changing dependencies, run `uv lock` and commit `uv.lock`.
 - `tests/test_project.py` checks these conventions (metadata, pytest settings, Makefile, CI, this file), so update it together with them.
 

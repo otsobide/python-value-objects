@@ -62,9 +62,10 @@ filterwarnings = [
 [tool.coverage.run]
 branch = true
 source = ["pyvalueobjects"]
+omit = ["pyvalueobjects/_legacy/*"]  # transitional: the 0.x code is deleted family by family
 
 [tool.coverage.report]
-fail_under = 0  # transitional: 0.x code has no gate; 100 from the first 1.0 core commit on
+fail_under = 100
 show_missing = true
 skip_covered = true
 exclude_also = ["@overload", "if TYPE_CHECKING:"]
