@@ -98,5 +98,5 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PT", "C4", "PIE"]
 ignore = ["RUF023"]                     # __slots__ order is the constructor's field order: never sort it
 
 [tool.ruff.lint.per-file-ignores]
-"pyvalueobjects/__init__.py" = ["F401", "I001"]  # transitional: 0.x re-exports without __all__, grouped by family
+"pyvalueobjects/__init__.py" = ["F401", "I001"]  # transitional: 0.x re-exports outside __all__, by family
 "tests/**" = ["E501", "RUF001", "PT018"] # wide sample tables, intentional confusables (Kelvin sign, Arabic digits)

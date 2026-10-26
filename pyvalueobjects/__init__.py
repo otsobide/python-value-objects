@@ -1,9 +1,21 @@
-# ----------------------------
-# ---------- Common ----------
-# ----------------------------
+"""Validated, immutable value objects for domain-driven design. Zero runtime dependencies."""
 
-from pyvalueobjects._legacy.abstract.valueobject import ValueObject
-from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._core import (
+    Bounded,
+    Bounds,
+    CurrencyMismatchError,
+    InvalidFormatError,
+    InvalidTypeError,
+    OutOfRangeError,
+    PrecisionError,
+    Scalar,
+    Sized,
+    ValueObject,
+    ValueObjectError,
+    ValueObjectMeta,
+)
+
+# Transitional 0.x re-exports, outside __all__: each family block replaces its own (B3-B9).
 
 # -----------------------------
 # ---------- Numbers ----------
@@ -55,3 +67,18 @@ from pyvalueobjects._legacy.security.cve import Cve
 from pyvalueobjects._legacy.security.nullable_cve import NullableCve
 from pyvalueobjects._legacy.security.cpe import Cpe
 from pyvalueobjects._legacy.security.nullable_cpe import NullableCpe
+
+__all__ = [
+    "Bounded",
+    "Bounds",
+    "CurrencyMismatchError",
+    "InvalidFormatError",
+    "InvalidTypeError",
+    "OutOfRangeError",
+    "PrecisionError",
+    "Scalar",
+    "Sized",
+    "ValueObject",
+    "ValueObjectError",
+    "ValueObjectMeta",
+]

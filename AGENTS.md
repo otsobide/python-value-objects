@@ -31,7 +31,7 @@ make clean                                           # removes build outputs and
 
 ## Architecture
 
-The 0.x implementation lives in `pyvalueobjects/_legacy/` until each family is rebuilt on the 1.0 core; the package root re-exports it. The rest of this section describes that legacy code.
+The 0.x implementation lives in `pyvalueobjects/_legacy/` until each family is rebuilt on the 1.0 core in `pyvalueobjects/_core.py`. The package root exports the 1.0 names in `__all__` and still re-exports the legacy classes outside it. Apart from its last paragraph, this section describes the legacy code.
 
 **Validation chain.** `ValueObject.__init__` (`pyvalueobjects/_legacy/abstract/valueobject.py`) calls `self._validate(value)` and then stores `_value`. Every subclass overrides `_validate` and calls `super()._validate(value)` first, so constraints accumulate through inheritance:
 
@@ -49,8 +49,8 @@ Type checks are strict (`type(value) != int`), so `bool` and subclasses are reje
 
 **Public API.** Users import everything from `pyvalueobjects/__init__.py`. The legacy modules import one another, and the 0.x tests import them, by full module path (`pyvalueobjects._legacy.numbers.int`), never through the package root, so the root exports can change without breaking them.
 
-Adding a value object touches: its module plus the `nullable_` counterpart, the export in `__init__.py`, `tests/<category>/<name>_test.py`, and a README section. `EmailAddress`, `Ipv4`, `Ipv6`, `MacAddress`, `Md5Hash`, `Sha256Hash`, `Url` and their nullable variants exist in `pyvalueobjects/_legacy/security/` but are currently not exported, tested, or documented.
+**Adding a value object** never touches `_legacy/`. A 1.0 value object is a declaration on the core (`ValueObject`, `Scalar`, `Bounded`, `Sized`, `literal()`, `binary_op`/`unary_op`). Adding one touches: its family module and that module's `__all__`; the import and `__all__` entry in `pyvalueobjects/__init__.py` (a new family module also joins `FAMILIES` in `tests/test_contract.py`); one `Sample` in `tests/samples.py`, which runs the generic contract tests on it (equality, hashing, immutability, pickling, copying, `repr`, `from_optional`, wrong types and more); and the family's own test module next to `tests/test_core.py`. `EmailAddress`, `Ipv4`, `Ipv6`, `MacAddress`, `Md5Hash`, `Sha256Hash`, `Url` and their nullable variants exist in `pyvalueobjects/_legacy/security/` but are not exported, tested, or documented; 1.0 replaces them.
 
 ## Tests
 
-The 0.x tests use `unittest` and run under pytest; new tests are plain pytest modules. Most 0.x suites set `self._cls` in `__init__` and cover hash/equality, `value()`, and error cases with `assertRaises(ValueObjectError, ...)`; nullable suites repeat the base suite and add a `None` case.
+The 0.x tests use `unittest` and run under pytest; new tests are plain pytest modules. `tests/conftest.py` runs every test under a hostile decimal context (precision 3, `ROUND_FLOOR`) and loads the hypothesis profile named by `HYPOTHESIS_PROFILE` (`dev` by default; CI uses `ci`, with 1,000 derandomized examples). Most 0.x suites set `self._cls` in `__init__` and cover hash/equality, `value()`, and error cases with `assertRaises(ValueObjectError, ...)`; nullable suites repeat the base suite and add a `None` case.
