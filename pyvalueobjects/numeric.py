@@ -189,6 +189,12 @@ def _decimal(text: str) -> Decimal:
     return Decimal(text, DECIMAL_CONTEXT)
 
 
+def _shown(value: Decimal) -> str:
+    """The text of a Decimal cut to 80 characters, for error messages."""
+    text = DECIMAL_CONTEXT.to_sci_string(value)
+    return text if len(text) <= 80 else f"{text[:77]}..."
+
+
 def _divide(dividend: Decimal | int, divisor: Decimal | int) -> Decimal:
     """DECIMAL_CONTEXT.divide, except that 0 / 0 raises ZeroDivisionError, as x / 0 does, not InvalidOperation."""
     if not divisor:
@@ -197,7 +203,7 @@ def _divide(dividend: Decimal | int, divisor: Decimal | int) -> Decimal:
 
 
 class DecimalNumber(Numeric[Decimal]):
-    """Exact finite decimal. Never accepts a float.
+    """Exact finite decimal that fits DECIMAL_CONTEXT (34 significant digits). Never accepts a float.
 
     Arithmetic runs in DECIMAL_CONTEXT, whatever the caller's context. ``-0`` becomes ``0``; the scale is kept
     (``'1.10'`` prints as given and equals ``'1.1'``).
@@ -225,6 +231,13 @@ class DecimalNumber(Numeric[Decimal]):
     def _validate(cls, value: Decimal) -> Decimal:
         if not value.is_finite():
             raise OutOfRangeError(f"must be finite, got {value}", vo=cls, value=value)
+        try:
+            fits = DECIMAL_CONTEXT.plus(value) == value  # too many digits rounds, an exponent beyond Emax overflows
+        except Overflow:
+            fits = False
+        if not fits:
+            reason = f"does not fit in DECIMAL_CONTEXT ({DECIMAL_CONTEXT.prec} significant digits), got {_shown(value)}"
+            raise OutOfRangeError(reason, vo=cls, value=value)
         if value.is_zero():
             value = value.copy_abs()  # no '-0'
         return super()._validate(value)

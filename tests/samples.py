@@ -65,7 +65,7 @@ SAMPLES: list[Sample] = [
     Sample(
         numeric.DecimalNumber,
         ["1.50", -3, Decimal("1e-30"), 2**100, "9" * 34],
-        invalid=["1_000", "١٢", "NaN", "sNaN", "Infinity", "1,5", "", Decimal("NaN")],
+        invalid=["1_000", "١٢", "NaN", "sNaN", "Infinity", "1,5", "", Decimal("NaN"), 10**40 + 1, "1e1000000"],
         wrong_type=NOT_DECIMAL,
         normalized=[(" 4.10 ", "4.10"), ("-0.00", "0.00"), (Decimal("-0"), "0"), ("1e3", "1E+3"), (Level.HIGH, "3")],
     ),

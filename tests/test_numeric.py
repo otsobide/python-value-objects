@@ -695,6 +695,31 @@ def test_decimal_must_be_finite_whatever_its_bounds(cls: type[DecimalNumber], ra
 
 
 @pytest.mark.parametrize(
+    ("raw", "shown"),
+    [
+        (10**40 + 1, "1" + "0" * 39 + "1"),
+        ("1.0000000000000000000000000000000001", "1.0000000000000000000000000000000001"),
+        ("1e1000000", "1E+1000000"),
+        (Decimal("1e-1000033"), "1E-1000033"),
+        (10**100 + 1, "1" + "0" * 76 + "..."),
+    ],
+)
+def test_decimal_must_fit_the_decimal_context(raw: Any, shown: str) -> None:
+    """Arithmetic in DECIMAL_CONTEXT would silently change such a value: DecimalNumber(10**40 + 1) + 0 lost the 1."""
+    with pytest.raises(OutOfRangeError) as info:
+        DecimalNumber(raw)
+    assert str(info.value) == f"DecimalNumber: does not fit in DECIMAL_CONTEXT (34 significant digits), got {shown}"
+
+
+@pytest.mark.parametrize(
+    "raw", ["9" * 34, "-0." + "9" * 34, "9.999999999999999999999999999999999E+999999", "1E-1000032"]
+)
+def test_decimal_accepts_the_extremes_of_the_decimal_context(raw: str) -> None:
+    number = DecimalNumber(raw)
+    assert number.value == Decimal(raw) and DecimalNumber.from_str(str(number)).value == Decimal(raw)
+
+
+@pytest.mark.parametrize(
     ("cls", "raw", "expected"),
     [
         (DecimalNumber, PositiveDecimal("1.5"), DecimalNumber("1.5")),
