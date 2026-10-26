@@ -8,6 +8,7 @@ import decimal
 import importlib
 import ipaddress
 import pickle
+import sys
 import uuid
 from dataclasses import FrozenInstanceError
 from typing import Any
@@ -16,14 +17,22 @@ import pytest
 
 import pyvalueobjects as vo
 from tests.samples import SAMPLES, Args, Sample
+from tests.test_core import CORE_SAMPLES
 
 # The modules whose __all__ the package root re-exports; each family joins when its names are exported.
 FAMILIES = ("_core",)
 EVAL_NS = {**vars(vo), "Decimal": decimal.Decimal, "datetime": datetime, "uuid": uuid, "ipaddress": ipaddress}
+# The public value objects, plus the core's throwaway ones, so the contract runs before any family registers.
+CONTRACTED = [*SAMPLES, *CORE_SAMPLES]
 
 
 def cases(attr: str) -> list[Any]:
-    return [pytest.param(s, raw, id=f"{s.id}-{raw!r}"[:80]) for s in SAMPLES for raw in getattr(s, attr)]
+    return [pytest.param(s, raw, id=f"{s.id}-{raw!r}"[:80]) for s in CONTRACTED for raw in getattr(s, attr)]
+
+
+def eval_ns(cls: type) -> dict[str, Any]:
+    """EVAL_NS over the namespace of the module that declares cls, so reprs of VOs declared in tests evaluate."""
+    return {**vars(sys.modules[cls.__module__]), **EVAL_NS}
 
 
 def test_every_public_value_object_has_samples() -> None:
@@ -37,7 +46,7 @@ def test_top_level_all_is_the_union_of_the_family_modules() -> None:
     assert sorted(vo.__all__) == sorted(names)
 
 
-@pytest.mark.parametrize("sample", SAMPLES, ids=lambda s: s.id)
+@pytest.mark.parametrize("sample", CONTRACTED, ids=lambda s: s.id)
 def test_samples_are_distinct(sample: Sample) -> None:
     built = [sample.build(raw) for raw in sample.valid]
     assert len(set(built)) == len(built) >= 2
@@ -80,7 +89,7 @@ class TestValid:
 
     def test_repr_evaluates_back(self, sample: Sample, raw: Any) -> None:
         a = sample.build(raw)
-        assert eval(repr(a), EVAL_NS) == a  # our own repr: safe to evaluate
+        assert eval(repr(a), eval_ns(sample.cls)) == a  # our own repr: safe to evaluate
 
     def test_str_and_format(self, sample: Sample, raw: Any) -> None:
         a = sample.build(raw)

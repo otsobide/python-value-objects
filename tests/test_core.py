@@ -44,6 +44,7 @@ from pyvalueobjects._core import (
     show,
     unary_op,
 )
+from tests.samples import Args, Sample
 
 PROTOCOLS = range(pickle.HIGHEST_PROTOCOL + 1)
 
@@ -1963,3 +1964,39 @@ def test_positive_subtraction_raises_exactly_when_not_positive(a: int, b: int) -
         assert a - b <= 0
     else:
         assert result.value == a - b > 0
+
+
+# ------------------------------------------------------------------------------------------- contract samples
+# test_contract.py runs the generic contract on these throwaway value objects too, so the contract suite is
+# exercised from the core on, and every kind of declaration the core supports is held to it.
+
+CORE_SAMPLES = [
+    Sample(Count, [0, -7, 2**100], wrong_type=["1", True, 1.0, None], normalized=[(Status.ACTIVE, "1")]),
+    Sample(Small, [3, -2], invalid=[12], wrong_type=["3"]),
+    Sample(Age, [0, 150], invalid=[-1, 151], wrong_type=["5", True], str_roundtrip=False),  # takes no text
+    Sample(Ratio, [0.5, 2], wrong_type=[True, "1"], normalized=[(2, "2.0"), (Heavy(1.5), "1.5")]),
+    Sample(Code, ["ab", "XY"], invalid=["a1", ""], wrong_type=[b"x", Status.ACTIVE, None], normalized=[(" ab ", "AB")]),
+    Sample(Hex, [255, "10"], invalid=["zz", ""], wrong_type=[1.5, True], normalized=[(16, "10")]),
+    Sample(Day, [datetime.date(2024, 2, 29), datetime.date(2000, 1, 1)], wrong_type=[datetime.datetime(2024, 1, 1)]),
+    Sample(Name, ["a", "abcde"], invalid=["", "abcdef"], wrong_type=[1]),
+    Sample(Point, [Args(1, 2), Args(2, 1)], wrong_type=[Args("1", 2), Args(1, None)], str_roundtrip=False),
+    Sample(Point3, [Args(1, 2, 3), Args(1, 2, 4)], wrong_type=[Args(1, 2.0, 3)], str_roundtrip=False),
+    Sample(Label, ["a", ""], wrong_type=[1, None], str_roundtrip=False),
+    Sample(Version, ["1.9", "1.10"], str_roundtrip=False),  # a custom _order_key
+    Sample(Secret, ["s", "t"], str_roundtrip=False),  # a private field behind a property
+    Sample(Tag, ["t", "u"], str_roundtrip=False),  # a single-string __slots__
+    Sample(
+        Parcel,
+        [Args(Label("a"), Point(1, 2)), Args(UserId("u"), Point3(1, 2, 3))],  # subclass parts are rebuilt
+        wrong_type=[Args("a", Point(1, 2)), Args(Label("a"), (1, 2))],
+        str_roundtrip=False,
+    ),
+    Sample(
+        Tagged,
+        [Args(" ab ", 2), Args(Code("xy"), Hex("ff"))],
+        invalid=[Args("1", 2)],
+        wrong_type=[Args(None, 2), Args("ab", "2")],
+        str_roundtrip=False,
+    ),
+    Sample(Kelvin, [Args(0, "K"), Args(5, "K")], invalid=[Args(-1, "K")], str_roundtrip=False),
+]
