@@ -59,7 +59,7 @@ from pyvalueobjects import Int
 my_integer = Int(9)
 
 # Getting raw value
-my_integer.value() # returns -> 9
+my_integer.value()  # returns -> 9
 ```
 
 ### Nullable Int
@@ -76,8 +76,8 @@ my_integer = NullableInt(9)
 my_nullable_integer = NullableInt(None)
 
 # Getting raw value
-my_integer.value() # returns -> 9
-my_nullable_integer.value() # returns -> None
+my_integer.value()  # returns -> 9
+my_nullable_integer.value()  # returns -> None
 ```
 
 ### Positive Int
@@ -91,7 +91,7 @@ from pyvalueobjects import PositiveInt
 my_integer = PositiveInt(9)
 
 # Getting raw value
-my_integer.value() # returns -> 9
+my_integer.value()  # returns -> 9
 ```
 
 ### Nullable Positive Int
@@ -108,8 +108,8 @@ my_integer = NullablePositiveInt(9)
 my_nullable_integer = NullablePositiveInt(None)
 
 # Getting raw value
-my_integer.value() # returns -> 9
-my_nullable_integer.value() # returns -> None
+my_integer.value()  # returns -> 9
+my_nullable_integer.value()  # returns -> None
 ```
 
 ### Positive Or Zero Int
@@ -123,7 +123,7 @@ from pyvalueobjects import PositiveOrZeroInt
 my_integer = PositiveOrZeroInt(9)
 
 # Getting raw value
-my_integer.value() # returns -> 9
+my_integer.value()  # returns -> 9
 ```
 
 ### Nullable Positive Or Zero Int
@@ -140,8 +140,8 @@ my_integer = NullablePositiveOrZeroInt(9)
 my_nullable_integer = NullablePositiveOrZeroInt(None)
 
 # Getting raw value
-my_integer.value() # returns -> 9
-my_nullable_integer.value() # returns -> None
+my_integer.value()  # returns -> 9
+my_nullable_integer.value()  # returns -> None
 ```
 
 ### Negative Int
@@ -155,7 +155,7 @@ from pyvalueobjects import NegativeInt
 my_integer = NegativeInt(-9)
 
 # Getting raw value
-my_integer.value() # returns -> -9
+my_integer.value()  # returns -> -9
 ```
 
 ### Nullable Negative Int
@@ -172,8 +172,8 @@ my_integer = NullableNegativeInt(-9)
 my_nullable_integer = NullableNegativeInt(None)
 
 # Getting raw value
-my_integer.value() # returns -> -9
-my_nullable_integer.value() # returns -> None
+my_integer.value()  # returns -> -9
+my_nullable_integer.value()  # returns -> None
 ```
 
 ### Negative Or Zero Int
@@ -187,7 +187,7 @@ from pyvalueobjects import NegativeOrZeroInt
 my_integer = NegativeOrZeroInt(-9)
 
 # Getting raw value
-my_integer.value() # returns -> -9
+my_integer.value()  # returns -> -9
 ```
 
 ### Nullable Negative Or Zero Int
@@ -204,8 +204,8 @@ my_integer = NullableNegativeOrZeroInt(-9)
 my_nullable_integer = NullableNegativeOrZeroInt(None)
 
 # Getting raw value
-my_integer.value() # returns -> -9
-my_nullable_integer.value() # returns -> None
+my_integer.value()  # returns -> -9
+my_nullable_integer.value()  # returns -> None
 ```
 
 ### Float
@@ -220,11 +220,11 @@ my_float = Float(9.5)
 
 # Creating from int or str
 my_float_from_int = Float.from_int(9)
-my_float_from_str = Float.from_str('9.5')
+my_float_from_str = Float.from_str("9.5")
 
 # Getting raw value
-my_float.value() # returns -> 9.5
-my_float_from_int.value() # returns -> 9.0
+my_float.value()  # returns -> 9.5
+my_float_from_int.value()  # returns -> 9.0
 ```
 
 ### Positive Float
@@ -238,10 +238,10 @@ from pyvalueobjects import PositiveFloat
 my_float = PositiveFloat(9.5)
 
 # Getting raw value
-my_float.value() # returns -> 9.5
+my_float.value()  # returns -> 9.5
 
 # Creation
-my_float2 = PositiveFloat(0.0) # raises error
+my_float2 = PositiveFloat(0.0)  # raises error
 ```
 
 ### Negative Float
@@ -255,10 +255,10 @@ from pyvalueobjects import NegativeFloat
 my_float = NegativeFloat(-9.5)
 
 # Getting raw value
-my_float.value() # returns -> -9.5
+my_float.value()  # returns -> -9.5
 
 # Creation
-my_float2 = NegativeFloat(0.0) # raises error
+my_float2 = NegativeFloat(0.0)  # raises error
 ```
 
 ## String value-objects
@@ -271,10 +271,10 @@ A basic string value object that ensures the value is a valid string. Provides t
 from pyvalueobjects import String
 
 # Creation
-my_str = String('potato')
+my_str = String("potato")
 
 # Getting raw value
-my_str.value() # returns -> 'potato'
+my_str.value()  # returns -> 'potato'
 ```
 
 ### Nullable String
@@ -285,16 +285,16 @@ A string value object that can also be None. Useful for optional string fields.
 from pyvalueobjects import NullableString
 
 # Creation
-my_str = NullableString('potato')
+my_str = NullableString("potato")
 
 # Getting raw value
-my_str.value() # returns -> 'potato'
+my_str.value()  # returns -> 'potato'
 
 # Creation
 my_nullable_str = NullableString(None)
 
 # Getting raw value
-my_nullable_str.value() # returns -> None
+my_nullable_str.value()  # returns -> None
 ```
 
 ### Non Empty String
@@ -305,13 +305,13 @@ A string value object that ensures the value is not an empty string. Useful for 
 from pyvalueobjects import NonEmptyString
 
 # Creation
-my_str = NonEmptyString('potato')
+my_str = NonEmptyString("potato")
 
 # Getting raw value
-my_str.value() # returns -> 'potato'
+my_str.value()  # returns -> 'potato'
 
 # Creation
-my_str2 = NonEmptyString('') # raises error
+my_str2 = NonEmptyString("")  # raises error
 ```
 
 ### Nullable non Empty String
@@ -322,19 +322,19 @@ A non-empty string value object that can also be None. Combines the validation o
 from pyvalueobjects import NullableNonEmptyString
 
 # Creation
-my_str = NullableNonEmptyString('potato')
+my_str = NullableNonEmptyString("potato")
 
 # Getting raw value
-my_str.value() # returns -> 'potato'
+my_str.value()  # returns -> 'potato'
 
 # Creation
 my_str2 = NullableNonEmptyString(None)
 
 # Getting raw value
-my_str2.value() # returns -> None
+my_str2.value()  # returns -> None
 
 # Creation
-my_str3 = NullableNonEmptyString('') # raises error
+my_str3 = NullableNonEmptyString("")  # raises error
 ```
 
 ### Uuid4
@@ -345,7 +345,7 @@ A string value object that ensures the value is a valid UUID v4 format. Useful f
 from pyvalueobjects import Uuid4
 
 # Creation
-my_uuid4 = Uuid4('6c7add12-bf35-459e-a6c5-3178a2a33011')
+my_uuid4 = Uuid4("6c7add12-bf35-459e-a6c5-3178a2a33011")
 
 # Getting raw value
 my_uuid4.value()  # returns -> '6c7add12-bf35-459e-a6c5-3178a2a33011'
@@ -359,7 +359,7 @@ A UUID v4 value object that can also be None. Combines the validation of Uuid4 w
 from pyvalueobjects import NullableUuid4
 
 # Creation
-my_uuid4 = NullableUuid4('6c7add12-bf35-459e-a6c5-3178a2a33011')
+my_uuid4 = NullableUuid4("6c7add12-bf35-459e-a6c5-3178a2a33011")
 my_null_uuid4 = NullableUuid4(None)
 
 # Getting raw value
@@ -377,7 +377,7 @@ A string value object that ensures the value is a valid ISO 8601 date format. Us
 from pyvalueobjects import IsoDate
 
 # Creation
-my_date = IsoDate('2023-08-15T04:55:12.076Z')
+my_date = IsoDate("2023-08-15T04:55:12.076Z")
 
 # Getting raw value
 my_date.value()  # returns -> '2023-08-15T04:55:12.076Z'
@@ -431,7 +431,7 @@ A string value object that ensures the value is a valid Common Vulnerabilities a
 from pyvalueobjects import Cve
 
 # Creation
-my_cve = Cve('CVE-2014-9418')
+my_cve = Cve("CVE-2014-9418")
 
 # Getting raw value
 my_cve.value()  # returns -> 'CVE-2014-9418'
@@ -445,7 +445,7 @@ A CVE value object that can also be None. Combines the validation of CVE with th
 from pyvalueobjects import NullableCve
 
 # Creation
-my_cve = NullableCve('CVE-2014-9418')
+my_cve = NullableCve("CVE-2014-9418")
 my_null_cve = NullableCve(None)
 
 # Getting raw value
@@ -461,7 +461,7 @@ A string value object that ensures the value is a valid Common Platform Enumerat
 from pyvalueobjects import Cpe
 
 # Creation
-my_cpe = Cpe('cpe:/a:openjdk:openjdk:8u282')
+my_cpe = Cpe("cpe:/a:openjdk:openjdk:8u282")
 
 # Getting raw value
 my_cpe.value()  # returns -> 'cpe:/a:openjdk:openjdk:8u282'
@@ -475,7 +475,7 @@ A CPE value object that can also be None. Combines the validation of CPE with th
 from pyvalueobjects import NullableCpe
 
 # Creation
-my_cpe = NullableCpe('cpe:/a:openjdk:openjdk:8u282')
+my_cpe = NullableCpe("cpe:/a:openjdk:openjdk:8u282")
 my_null_cpe = NullableCpe(None)
 
 # Getting raw value

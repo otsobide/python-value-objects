@@ -251,6 +251,8 @@ GENERATED_PATHS = [
     "dist/",
     "pyvalueobjects.egg-info/",
     ".pytest_cache/",
+    ".mypy_cache/",
+    ".ruff_cache/",
     ".coverage",
     "htmlcov/",
     ".hypothesis/",
@@ -460,3 +462,88 @@ def test_regression_C43_collection_keeps_the_stdlib_numbers_module(collection: l
     import numbers
 
     assert Path(numbers.__file__).parent == Path(sysconfig.get_path("stdlib"))
+
+
+# ------------------------------------------------------------------------------------------- lint and type checks
+
+RUFF = PYPROJECT["tool"]["ruff"]
+MYPY = PYPROJECT["tool"]["mypy"]
+RUFF_LEGACY = RUFF.get("extend-exclude", [])
+MYPY_LEGACY = sorted(module for o in MYPY.get("overrides", []) if o.get("ignore_errors") for module in o["module"])
+MYPY_EXCLUDE = [MYPY["exclude"]] if isinstance(MYPY.get("exclude"), str) else MYPY.get("exclude", [])
+
+
+def ruff_files(root: Path) -> set[str]:
+    """Files that `ruff check .` lints under `root`, relative to it."""
+    run = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", "--show-files", "."],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == 0, run.stderr
+    return {Path(line).relative_to(root).as_posix() for line in run.stdout.splitlines() if line.strip()}
+
+
+def test_ruff_and_mypy_target_the_oldest_supported_python() -> None:
+    major, minor = python_floor()
+    assert RUFF["target-version"] == f"py{major}{minor}"
+    assert MYPY["python_version"] == f"{major}.{minor}"
+
+
+def test_mypy_checks_the_package_strictly() -> None:
+    assert MYPY["strict"] is True
+    assert "pyvalueobjects" in MYPY["files"]
+
+
+@pytest.mark.parametrize("path", RUFF_LEGACY)
+def test_ruff_exclusions_point_at_existing_legacy_code(path: str) -> None:
+    """A stale exclusion would silently skip whatever later lands at that path."""
+    assert (ROOT / path).exists()
+
+
+@pytest.mark.parametrize("module", MYPY_LEGACY)
+def test_mypy_overrides_point_at_existing_legacy_packages(module: str) -> None:
+    assert module.endswith(".*")
+    assert ROOT.joinpath(*module.removesuffix(".*").split(".")).is_dir()
+
+
+def test_ruff_and_mypy_skip_the_same_legacy_packages() -> None:
+    """mypy needs both the `exclude` and the override: it still follows the imports of pyvalueobjects/__init__.py."""
+    packages = {path for path in RUFF_LEGACY if path.startswith("pyvalueobjects/")}
+    assert packages == {module.removesuffix(".*").replace(".", "/") for module in MYPY_LEGACY}
+    for package in packages:
+        assert any(re.search(pattern, f"{package}/module.py") for pattern in MYPY_EXCLUDE), package
+
+
+def test_ruff_lints_new_code_and_skips_legacy_code(tmp_path: Path) -> None:
+    shutil.copy(ROOT / "pyproject.toml", tmp_path)
+    new = ["pyvalueobjects/__init__.py", "pyvalueobjects/_core.py", "tests/__init__.py", "tests/test_core.py"]
+    legacy = [f"{path}/module.py" for path in RUFF_LEGACY]
+    for path in new + legacy:
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).touch()
+    assert ruff_files(tmp_path) == {"pyproject.toml", *new}
+
+
+def test_ruff_lints_the_new_modules_of_this_repository() -> None:
+    linted = ruff_files(ROOT)
+    assert {"pyvalueobjects/__init__.py", "tests/test_project.py"} <= linted
+    assert [path for path in linted if any(path.startswith(f"{legacy}/") for legacy in RUFF_LEGACY)] == []
+
+
+@pytest.mark.parametrize(
+    ("target", "commands"),
+    [
+        ("lint", ["uv run ruff check .", "uv run ruff format --check ."]),
+        ("format", ["uv run ruff check --fix .", "uv run ruff format ."]),
+        ("typecheck", ["uv run mypy"]),
+    ],
+)
+def test_make_quality_targets(target: str, commands: list[str]) -> None:
+    assert make(target) == commands
+
+
+def test_make_check_runs_lint_then_types_then_coverage() -> None:
+    assert make("check") == make("lint") + make("typecheck") + make("cov")
