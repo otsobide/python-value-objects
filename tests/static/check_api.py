@@ -8,6 +8,7 @@ from typing import assert_type
 
 from pyvalueobjects import Bounded, InvalidTypeError, Scalar, Sized, ValueObject, ValueObjectError
 from pyvalueobjects._core import binary_op, literal, unary_op
+from pyvalueobjects.numeric import Int, PositiveInt
 
 
 class Code(Scalar[str]):
@@ -68,3 +69,15 @@ match Code("a"):
         assert_type(value, str)
 
 Code("a").value = "b"  # type: ignore[misc]  # read-only: an unused ignore would fail mypy
+
+# numbers
+assert_type(PositiveInt(1).value, int)
+assert_type(PositiveInt.from_optional(None), PositiveInt | None)
+assert_type(Int(PositiveInt(1)), Int)
+assert_type(int(Int(1)), int)
+assert_type(Int(1).is_negative(), bool)
+match PositiveInt(5):
+    case PositiveInt(number):
+        assert_type(number, int)
+
+PositiveInt("5")  # type: ignore[arg-type]  # must stay rejected

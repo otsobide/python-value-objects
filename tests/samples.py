@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 import pyvalueobjects as vo
+from pyvalueobjects import numeric
 
 
 class Args(tuple[Any, ...]):
@@ -32,5 +35,18 @@ class Sample:
         return self.cls.__name__
 
 
+class Level(enum.IntEnum):
+    HIGH = 3
+
+
+NOT_INT = ["1", None, True, 1.0, Decimal(1), [1]]
+
 # Each family adds a Sample per value object in the commit that adds the value object (B3-B9).
-SAMPLES: list[Sample] = []
+SAMPLES: list[Sample] = [
+    # numbers
+    Sample(numeric.Int, [0, -7, 2**100], wrong_type=NOT_INT, normalized=[(Level.HIGH, "3")], str_roundtrip=False),
+    Sample(numeric.PositiveOrZeroInt, [0, 10**30], invalid=[-1], wrong_type=NOT_INT, str_roundtrip=False),
+    Sample(numeric.PositiveInt, [1, 10**30], invalid=[0, -1], wrong_type=NOT_INT, str_roundtrip=False),
+    Sample(numeric.NegativeOrZeroInt, [0, -5], invalid=[1], wrong_type=NOT_INT, str_roundtrip=False),
+    Sample(numeric.NegativeInt, [-1, -(10**30)], invalid=[0, 1], wrong_type=NOT_INT, str_roundtrip=False),
+]
