@@ -689,10 +689,46 @@ def test_make_check_runs_lint_then_types_then_coverage() -> None:
 # ------------------------------------------------------------------------------------------- continuous integration
 
 WORKFLOWS = ROOT / ".github" / "workflows"
-CI = (WORKFLOWS / "tests.yml").read_text(encoding="utf-8")
-CI_JOBS = dict(
-    re.findall(r"^  ([a-z-]+):\n(.*?)(?=^  [a-z-]+:\n|\Z)", CI.split("\njobs:\n", 1)[1], re.MULTILINE | re.DOTALL)
-)
+CI_SOURCE = (WORKFLOWS / "tests.yml").read_text(encoding="utf-8")
+
+
+def uncommented(text: str) -> str:
+    """`text` without comment lines: a YAML comment, or a shell comment inside a `run: |` block, disables a line."""
+    return "".join(line for line in text.splitlines(keepends=True) if not line.lstrip().startswith("#"))
+
+
+def blocks(text: str, indent: int) -> dict[str, str]:
+    """The `key:` entries of a YAML mapping at `indent`, each with the lines nested under it."""
+    margin = " " * indent
+    pattern = rf"^{margin}([\w-]+):[^\n]*\n(.*?)(?=^{margin}[\w-]+:|\Z)"
+    return dict(re.findall(pattern, text, re.MULTILINE | re.DOTALL))
+
+
+def ci_steps(job: str) -> list[dict[str, str]]:
+    """The steps of a job as {key: value}; the lines nested under `run: |` or `with:` form one value."""
+    steps: list[dict[str, str]] = []
+    key = ""
+    for line in job.split("\n    steps:\n", 1)[1].splitlines():
+        if line.startswith("      - "):
+            steps.append({})
+            line = "        " + line.removeprefix("      - ")
+        if match := re.fullmatch(r" {8}([\w-]+):(?: (.*))?", line):
+            key = match[1]
+            steps[-1][key] = "" if match[2] in (None, "|") else match[2]
+        else:
+            steps[-1][key] = f"{steps[-1][key]}\n{line.strip()}".lstrip("\n")
+    return steps
+
+
+CI = uncommented(CI_SOURCE)
+CI_TRIGGERS = sorted(blocks(blocks(CI, 0)["on"], 2))
+CI_JOBS = blocks(blocks(CI, 0)["jobs"], 2)
+
+
+def ci_runs(job: str) -> list[str]:
+    return [step["run"] for step in ci_steps(CI_JOBS[job]) if "run" in step]
+
+
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 REPOSITORY = "otsobide/python-value-objects"
 
@@ -704,6 +740,14 @@ def make_calls(text: str) -> list[str]:
 
 def test_ci_has_a_test_matrix_and_a_quality_job() -> None:
     assert sorted(CI_JOBS) == ["quality", "test"]
+
+
+def test_ci_runs_on_every_push_and_pull_request() -> None:
+    assert {"push", "pull_request"} <= set(CI_TRIGGERS)
+
+
+def test_ci_runs_hypothesis_with_the_ci_profile() -> None:
+    assert re.search(r"^    env:\n      HYPOTHESIS_PROFILE: ci$", CI_JOBS["test"], re.MULTILINE)
 
 
 def test_ci_tests_every_supported_python() -> None:
@@ -720,29 +764,49 @@ def test_ci_quality_job_runs_on_the_oldest_supported_python() -> None:
 
 @pytest.mark.parametrize("job", ["test", "quality"])
 def test_ci_installs_exactly_what_uv_lock_pins(job: str) -> None:
-    assert "uses: astral-sh/setup-uv@" in CI_JOBS[job]
-    assert "uv sync --locked" in CI_JOBS[job]
-    assert "setup-python" not in CI_JOBS[job]
+    actions = [step["uses"].split("@")[0] for step in ci_steps(CI_JOBS[job]) if "uses" in step]
+    assert actions == ["actions/checkout", "astral-sh/setup-uv"]
+    assert ci_runs(job)[0] == "uv sync --locked"
     assert "pip install -r" not in CI_JOBS[job]
 
 
 def test_ci_runs_the_suite_with_coverage() -> None:
-    assert "uv run pytest --cov" in CI_JOBS["test"]
+    assert ci_runs("test") == ["uv sync --locked", "uv run pytest --cov"]
+
+
+def test_ci_quality_job_checks_lint_types_and_builds() -> None:
+    assert ci_runs("quality")[:3] == [
+        "uv sync --locked",
+        "make lint typecheck",
+        "make build && uvx twine check --strict dist/*",
+    ]
 
 
 @pytest.mark.parametrize(
-    "command",
+    ("name", "command"),
     [
-        "make lint typecheck",
-        "make build && uvx twine check --strict dist/*",
-        "rglob('*.py')",  # the wheel ships every module of the source tree (#32 C45)
-        "/tmp/smoke/bin/python -I -c",  # -I: import the installed wheel, not the checkout in the working directory
-        "assert not m.requires('pyvalueobjects')",
-        "m.metadata('pyvalueobjects')['Requires-Python'] == '>=3.11'",
+        ("The wheel ships every module of the source tree", "rglob('*.py')"),  # #32 C45
+        # -I: import the installed wheel, not the checkout in the working directory
+        ("The wheel installs alone and declares no dependencies", "/tmp/smoke/bin/python -I -c"),
+        ("The wheel installs alone and declares no dependencies", "assert not m.requires('pyvalueobjects')"),
+        (
+            "The wheel installs alone and declares no dependencies",
+            "m.metadata('pyvalueobjects')['Requires-Python'] == '>=3.11'",
+        ),
     ],
 )
-def test_ci_quality_job_checks_lint_types_and_the_built_wheel(command: str) -> None:
-    assert command in CI_JOBS["quality"]
+def test_ci_quality_job_checks_the_built_wheel(name: str, command: str) -> None:
+    [run] = [step["run"] for step in ci_steps(CI_JOBS["quality"]) if step.get("name") == name]
+    assert command in run
+
+
+@pytest.mark.parametrize("command", ["uv run pytest --cov", "make build", "/tmp/smoke/bin/python", "python3 -c"])
+def test_regression_ci_checks_ignore_commented_out_steps(command: str) -> None:
+    """The checks matched raw substrings of the workflow, so a step disabled with `#` still passed (#39 review)."""
+    disabled = re.sub(rf"^( +)((?:- run: )?{re.escape(command)})", r"\1# \2", CI_SOURCE, flags=re.MULTILINE)
+    assert disabled != CI_SOURCE
+    jobs = blocks(blocks(uncommented(disabled), 0)["jobs"], 2).values()
+    assert [run for job in jobs for step in ci_steps(job) if command in (run := step.get("run", ""))] == []
 
 
 @pytest.mark.parametrize("target", make_calls(CI))
