@@ -324,6 +324,26 @@ def git_ignores(tmp_path_factory: pytest.TempPathFactory) -> Callable[[str], boo
     return ignores
 
 
+def gitignore_sections() -> dict[str, list[str]]:
+    """The patterns of .gitignore under each `# heading` line."""
+    sections: dict[str, list[str]] = {}
+    heading = ""
+    for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines():
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip()
+        elif line.strip():
+            sections.setdefault(heading, []).append(line.strip())
+    return sections
+
+
+@pytest.mark.parametrize(
+    ("heading", "patterns"), [("mypy", [".mypy_cache/", ".dmypy.json", "dmypy.json"]), ("ruff", [".ruff_cache/"])]
+)
+def test_regression_gitignore_lists_each_dev_tool_under_its_heading(heading: str, patterns: list[str]) -> None:
+    """`# ruff` was inserted above the mypy daemon files, which then sat under the ruff heading (#39 review)."""
+    assert gitignore_sections()[heading] == patterns
+
+
 @pytest.mark.parametrize("path", [".venv/", *GENERATED_PATHS])
 def test_generated_paths_are_ignored_by_git(git_ignores: Callable[[str], bool], path: str) -> None:
     assert git_ignores(path), f"{path} is not in .gitignore"
