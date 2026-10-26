@@ -23,7 +23,6 @@ make clean                                           # removes build outputs and
 ```
 
 - pytest collects the new `test_*.py` modules and the 0.x unittest modules named `*_test.py`. Plain pytest discovery finds both patterns; only `python -m unittest discover` needs `-p '*_test.py'`. Every test directory needs an `__init__.py`, so pytest imports its modules as `tests.<dir>.<module>`.
-- Run the tests from the repository root. Until the 0.x number tests are deleted, the legacy `tests/numbers` package shadows the stdlib `numbers` module whenever `tests/` itself is on `sys.path`, and `decimal` then fails to import: `cd tests && python -m pytest` breaks, and `unittest discover -s tests` needs `-t .`.
 - Warnings are errors. The one exception is a transitional filter for the invalid escape sequences in the legacy `cpe.py`.
 - ruff and strict mypy skip the 0.x code (`extend-exclude` for ruff, `exclude` plus `ignore_errors` overrides for mypy, all in `pyproject.toml`). New code must pass `make lint typecheck`, and `make cov` fails under 100 % line and branch coverage of `pyvalueobjects/`, which omits the 0.x code until it is deleted.
 - CI (`.github/workflows/tests.yml`) runs `uv sync --locked` and `uv run pytest --cov` on Python 3.11–3.15, plus a quality job on 3.11 that runs lint and mypy, builds and `twine check`s the package, and installs the wheel alone. Code must stay 3.11-compatible. After changing dependencies, run `uv lock` and commit `uv.lock`.
@@ -31,23 +30,24 @@ make clean                                           # removes build outputs and
 
 ## Architecture
 
-The 0.x implementation lives in `pyvalueobjects/_legacy/` until each family is rebuilt on the 1.0 core in `pyvalueobjects/_core.py`. The package root exports the 1.0 names in `__all__` and still re-exports the legacy classes outside it. Apart from its last paragraph, this section describes the legacy code.
+The 0.x implementation lives in `pyvalueobjects/_legacy/` until each family is rebuilt on the 1.0 core in `pyvalueobjects/_core.py`. The package root exports the 1.0 names in `__all__` and still re-exports the legacy classes outside it. Apart from its last two paragraphs, this section describes the legacy code.
 
 **Validation chain.** `ValueObject.__init__` (`pyvalueobjects/_legacy/abstract/valueobject.py`) calls `self._validate(value)` and then stores `_value`. Every subclass overrides `_validate` and calls `super()._validate(value)` first, so constraints accumulate through inheritance:
 
-- `Int` → `PositiveOrZeroInt` → `PositiveInt`; `Int` → `NegativeOrZeroInt` → `NegativeInt`
-- `Float` → `PositiveFloat`; `Float` → `NegativeFloat` (`Float` also rejects NaN and infinities)
 - `String` → `NonEmptyString` → `Uuid4`, `Cve`, `Cpe` and the other `security/` types; `String` → `IsoDate`
+- the 0.x `Int` (`pyvalueobjects/_legacy/numbers/int.py`) survives alone, because the 0.x list tests import it
 
-Type checks are strict (`type(value) != int`), so `bool` and subclasses are rejected. Conversions go through classmethods (`Int.from_str`/`from_float`, `Float.from_str`/`from_int`) that build with `cls(...)`, so they work for every subclass. Regex-based types keep a class-private compiled `__MATCHER` and raise `ValueObjectError` on mismatch.
+Type checks are strict (`type(value) != str`, `type(value) != int`), so `bool` and other subclasses are rejected. Conversions go through classmethods (`Int.from_str`/`from_float`) that build with `cls(...)`, so they work for every subclass. Regex-based types keep a class-private compiled `__MATCHER` and raise `ValueObjectError` on mismatch.
 
-**Equality and hashing** are value-based, not type-based: `Int(1) == PositiveInt(1)` is `True`, and comparing against a non-`ValueObject` (`Int(1) == 1`) raises `ValueObjectError` instead of returning `False`.
+**Equality and hashing** are value-based, not type-based: `String("a") == NonEmptyString("a")` is `True`, and comparing against a non-`ValueObject` (`String("a") == "a"`) raises `ValueObjectError` instead of returning `False`.
 
 **Nullable variants.** `build_nullable(cls)` (`pyvalueobjects/_legacy/abstract/nullablevalueobject.py`) returns a subclass whose `__init__` sets `_value = None` and skips validation when given `None`. Each `NullableX` lives in its own `nullable_x.py` module as `_nullable_cls = build_nullable(X)` followed by `class NullableX(_nullable_cls)` with a `value=None` default.
 
 **Lists.** `ArrayList(cls)` and `NullableArrayList(cls)` are factory functions that return a new class, used as `ArrayList(Int)([1, 2])`. Elements are validated by constructing `cls(element)` for each item. Generated classes are cached per element type in a module-level dict, so `ArrayList(Int) is ArrayList(Int)` and `isinstance` checks work; `NullableArrayList(Int)` subclasses the cached `ArrayList(Int)`.
 
 **Public API.** Users import everything from `pyvalueobjects/__init__.py`. The legacy modules import one another, and the 0.x tests import them, by full module path (`pyvalueobjects._legacy.numbers.int`), never through the package root, so the root exports can change without breaking them.
+
+**Numbers (1.0)** live in `pyvalueobjects/numeric.py`. `Numeric` operators keep the left operand's concrete type and re-validate every result, so `PositiveInt(1) - PositiveInt(5)` raises; other VO types, `bool` and floats in decimal arithmetic are `TypeError`s. `Int`, `Float` and `DecimalNumber` each have four sign variants declared as one bound (`class PositiveInt(PositiveOrZeroInt): gt = 0`). Text goes through the core's ASCII `literal()` grammars. Every `Decimal` is parsed, computed, printed and formatted in `DECIMAL_CONTEXT`, never in the caller's context, which `tests/conftest.py` makes hostile; `places` fixes a scale and never rounds.
 
 **Adding a value object** never touches `_legacy/`. A 1.0 value object is a declaration on the core (`ValueObject`, `Scalar`, `Bounded`, `Sized`, `literal()`, `binary_op`/`unary_op`). Adding one touches: its family module and that module's `__all__`; the import and `__all__` entry in `pyvalueobjects/__init__.py` (a new family module also joins `FAMILIES` in `tests/test_contract.py`); one `Sample` in `tests/samples.py`, which runs the generic contract tests on it (equality, hashing, immutability, pickling, copying, `repr`, `from_optional`, wrong types and more); the family's own test module next to `tests/test_core.py`; and `assert_type` lines for its typed API in `tests/static/check_api.py`, which mypy checks and pytest never runs. `EmailAddress`, `Ipv4`, `Ipv6`, `MacAddress`, `Md5Hash`, `Sha256Hash`, `Url` and their nullable variants exist in `pyvalueobjects/_legacy/security/` but are not exported, tested, or documented; 1.0 replaces them.
 

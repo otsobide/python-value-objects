@@ -672,7 +672,8 @@ def test_regression_C43_make_test_lets_pytest_name_the_modules() -> None:
 
 @pytest.mark.parametrize("directory", sorted({str(Path(path).parent) for path in TEST_MODULES}))
 def test_regression_C43_every_test_directory_is_a_package(directory: str) -> None:
-    """pytest imports tests/numbers/int_test.py as tests.numbers.int_test only while each directory has __init__.py."""
+    """pytest imports tests/lists/array_list_test.py as tests.lists.array_list_test only while each directory has
+    __init__.py."""
     for package in [Path(directory), *Path(directory).parents][:-1]:
         assert (ROOT / package / "__init__.py").is_file(), f"{package} is not a package"
 
@@ -1100,15 +1101,11 @@ def test_agents_md_only_mentions_existing_paths(path: str) -> None:
     assert (ROOT / path).exists()
 
 
-def test_regression_C43_agents_md_warns_about_test_packages_named_after_stdlib_modules() -> None:
-    """`cd tests && python -m pytest` still lets tests/numbers shadow the stdlib `numbers` (#32 C43, #39 review)."""
-    tests = ROOT / "tests"
-    shadowing = sorted(
-        p.name for p in tests.iterdir() if (p / "__init__.py").is_file() and p.name in sys.stdlib_module_names
-    )
-    for name in shadowing:
-        assert f"`tests/{name}` package shadows the stdlib `{name}` module" in AGENTS
-        assert "Run the tests from the repository root." in AGENTS
+def test_regression_C43_no_test_package_is_named_after_a_stdlib_module() -> None:
+    """tests/numbers shadowed the stdlib `numbers` whenever tests/ was on sys.path, so `cd tests && python -m pytest`
+    broke (#32 C43). It went with the 0.x number tests (#41); a test package must never take a stdlib name again."""
+    packages = [path.name for path in (ROOT / "tests").rglob("__init__.py") for path in [path.parent]]
+    assert [name for name in packages if name in sys.stdlib_module_names] == []
 
 
 def test_agents_md_states_the_supported_python_range() -> None:

@@ -89,7 +89,6 @@ extend-exclude = [  # transitional: the 0.x code and its unittest suites
     "pyvalueobjects/_legacy",
     "tests/dates",
     "tests/lists",
-    "tests/numbers",
     "tests/security",
     "tests/strings",
 ]
