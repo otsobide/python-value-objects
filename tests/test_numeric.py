@@ -772,6 +772,32 @@ def test_decimal_from_str_applies_the_bounds_of_the_class(cls: type[DecimalNumbe
     assert str(info.value) == message
 
 
+@pytest.mark.parametrize(
+    ("number", "spec", "text"),
+    [
+        (DecimalNumber("1.35"), ".1f", "1.4"),  # half-even: the hostile ROUND_FLOOR would give 1.3
+        (DecimalNumber("1.25"), ".1f", "1.2"),
+        (DecimalNumber("2.675"), ".2f", "2.68"),
+        (DecimalNumber("-2.675"), ".2f", "-2.68"),
+        (DecimalNumber("1234.5"), ",", "1,234.5"),
+        (DecimalNumber("0.125"), ".1%", "12.5%"),
+        (Cents(3), ">8", "    3.00"),
+        (DecimalNumber("1.50"), "", "1.50"),
+    ],
+)
+def test_decimal_formats_in_the_decimal_context(number: DecimalNumber, spec: str, text: str) -> None:
+    assert format(number, spec) == text and decimal.getcontext().rounding == decimal.ROUND_FLOOR  # restored
+
+
+def test_decimal_text_ignores_the_caller_context() -> None:
+    """A context with capitals=0 prints Decimal('1E+40') as '1e+40'."""
+    with decimal.localcontext(decimal.Context(capitals=0)):
+        number = DecimalNumber("1e40")
+        assert str(number) == "1E+40" and repr(number) == "DecimalNumber('1E+40')" and f"{number}" == "1E+40"
+        with pytest.raises(PrecisionError, match=r"got 1E-40$"):
+            Cents("1e-40")
+
+
 @given(st.decimals(allow_nan=False, allow_infinity=False, places=8, min_value=-(10**20), max_value=10**20))
 def test_decimal_text_round_trips(number: Decimal) -> None:
     built = DecimalNumber(number)

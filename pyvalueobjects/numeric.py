@@ -6,7 +6,7 @@ import math
 import operator
 import re
 import sys
-from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow
+from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow, localcontext
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from pyvalueobjects._core import (
@@ -265,6 +265,13 @@ class DecimalNumber(Numeric[Decimal]):
     def rounded(self, places: int = 0, rounding: str = ROUND_HALF_EVEN) -> Self:
         """The value rounded to ``places`` decimals (a negative ``places`` rounds to tens, hundreds...)."""
         return type(self)(_quantize(type(self), self._value, places, rounding))
+
+    def __str__(self) -> str:
+        return DECIMAL_CONTEXT.to_sci_string(self._value)  # the caller's context could print '1e+40'
+
+    def __format__(self, spec: str) -> str:
+        with localcontext(DECIMAL_CONTEXT):  # a precision in ``spec`` rounds as the library does, not as the caller
+            return super().__format__(spec)
 
 
 class PositiveOrZeroDecimal(DecimalNumber):
