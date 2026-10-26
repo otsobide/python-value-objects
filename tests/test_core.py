@@ -1430,7 +1430,15 @@ def test_literal_pins_the_grammar_whatever_the_converter_accepts(loose: str) -> 
         ISO_DATE(loose)
 
 
-@pytest.mark.parametrize(("parse", "text"), [(ISO_DATE, "2024-02-30"), (INTEGER, "1" * 4301)])
+TOO_MANY_DIGITS = "1" * 4301  # int() refuses it under the default digit limit, which int_digit_limit pins
+
+
+@pytest.mark.usefixtures("int_digit_limit")
+@pytest.mark.parametrize(
+    ("parse", "text"),
+    [(ISO_DATE, "2024-02-30"), (INTEGER, TOO_MANY_DIGITS)],
+    ids=["impossible-day", "too-many-digits"],
+)
 def test_literal_lets_converter_errors_through(parse: Callable[[str], Any], text: str) -> None:
     """The text matches the grammar, so the error is the converter's (an impossible day, too many digits)."""
     with pytest.raises(ValueError, match=r"^(?!not a valid literal)"):  # any message but the grammar's
@@ -1456,7 +1464,12 @@ def test_literal_as_parse_str(text: str, value: int) -> None:
     assert Whole.from_str(text) == Whole(value)
 
 
-@pytest.mark.parametrize("text", ["1_000", "١٢", "1.0", "", "1" * 4301])
+@pytest.mark.usefixtures("int_digit_limit")
+@pytest.mark.parametrize(
+    "text",
+    ["1_000", "١٢", "1.0", "", TOO_MANY_DIGITS],
+    ids=["underscore", "arabic", "float", "empty", "too-many-digits"],
+)
 def test_literal_errors_become_invalid_format_errors_in_from_str(text: str) -> None:
     with pytest.raises(InvalidFormatError, match=f"^Whole: cannot parse {re.escape(show(text))}$") as info:
         Whole.from_str(text)
