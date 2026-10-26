@@ -28,6 +28,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+import pyvalueobjects
 from pyvalueobjects import numeric
 from pyvalueobjects._core import (
     Bounded,
@@ -159,6 +160,14 @@ class Price(PositiveOrZeroDecimal):
 
 
 # ------------------------------------------------------------------------------------------- the shared base
+
+
+def test_the_package_root_exports_these_numbers_and_no_nullable_variant() -> None:
+    """1.0 has no Nullable* classes: annotate with ``PositiveInt | None`` and build with ``from_optional``."""
+    assert all(getattr(pyvalueobjects, name) is getattr(numeric, name) for name in numeric.__all__)
+    assert [
+        name for name in dir(pyvalueobjects) if name.startswith("Nullable") and name.endswith(("Int", "Float"))
+    ] == []
 
 
 def test_numeric_is_an_abstract_bounded_scalar() -> None:

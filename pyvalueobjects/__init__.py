@@ -14,26 +14,28 @@ from pyvalueobjects._core import (
     ValueObjectError,
     ValueObjectMeta,
 )
+from pyvalueobjects.numeric import (
+    DECIMAL_CONTEXT,
+    DecimalNumber,
+    Float,
+    Int,
+    NegativeDecimal,
+    NegativeFloat,
+    NegativeInt,
+    NegativeOrZeroDecimal,
+    NegativeOrZeroFloat,
+    NegativeOrZeroInt,
+    Numeric,
+    Percentage,
+    PositiveDecimal,
+    PositiveFloat,
+    PositiveInt,
+    PositiveOrZeroDecimal,
+    PositiveOrZeroFloat,
+    PositiveOrZeroInt,
+)
 
-# Transitional 0.x re-exports, outside __all__: each family block replaces its own (B3-B9).
-
-# -----------------------------
-# ---------- Numbers ----------
-# -----------------------------
-
-from pyvalueobjects._legacy.numbers.int import Int
-from pyvalueobjects._legacy.numbers.negative_int import NegativeInt
-from pyvalueobjects._legacy.numbers.negative_or_zero_int import NegativeOrZeroInt
-from pyvalueobjects._legacy.numbers.nullable_int import NullableInt
-from pyvalueobjects._legacy.numbers.nullable_negative_int import NullableNegativeInt
-from pyvalueobjects._legacy.numbers.nullable_negative_or_zero_int import NullableNegativeOrZeroInt
-from pyvalueobjects._legacy.numbers.nullable_positive_or_zero_int import NullablePositiveOrZeroInt
-from pyvalueobjects._legacy.numbers.positive_int import PositiveInt
-from pyvalueobjects._legacy.numbers.nullable_positive_int import NullablePositiveInt
-from pyvalueobjects._legacy.numbers.positive_or_zero_int import PositiveOrZeroInt
-from pyvalueobjects._legacy.numbers.float import Float
-from pyvalueobjects._legacy.numbers.positive_float import PositiveFloat
-from pyvalueobjects._legacy.numbers.negative_float import NegativeFloat
+# Transitional 0.x re-exports, outside __all__: each family block replaces its own (B4-B9).
 
 # -----------------------------
 # ---------- Strings ----------
@@ -69,12 +71,30 @@ from pyvalueobjects._legacy.security.cpe import Cpe
 from pyvalueobjects._legacy.security.nullable_cpe import NullableCpe
 
 __all__ = [
+    "DECIMAL_CONTEXT",
     "Bounded",
     "Bounds",
     "CurrencyMismatchError",
+    "DecimalNumber",
+    "Float",
+    "Int",
     "InvalidFormatError",
     "InvalidTypeError",
+    "NegativeDecimal",
+    "NegativeFloat",
+    "NegativeInt",
+    "NegativeOrZeroDecimal",
+    "NegativeOrZeroFloat",
+    "NegativeOrZeroInt",
+    "Numeric",
     "OutOfRangeError",
+    "Percentage",
+    "PositiveDecimal",
+    "PositiveFloat",
+    "PositiveInt",
+    "PositiveOrZeroDecimal",
+    "PositiveOrZeroFloat",
+    "PositiveOrZeroInt",
     "PrecisionError",
     "Scalar",
     "Sized",

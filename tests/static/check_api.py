@@ -7,9 +7,22 @@ from datetime import date
 from decimal import Decimal
 from typing import assert_type
 
-from pyvalueobjects import Bounded, InvalidTypeError, Scalar, Sized, ValueObject, ValueObjectError
+from pyvalueobjects import (
+    Bounded,
+    DecimalNumber,
+    Float,
+    Int,
+    InvalidTypeError,
+    Percentage,
+    PositiveDecimal,
+    PositiveFloat,
+    PositiveInt,
+    Scalar,
+    Sized,
+    ValueObject,
+    ValueObjectError,
+)
 from pyvalueobjects._core import binary_op, literal, unary_op
-from pyvalueobjects.numeric import DecimalNumber, Float, Int, Percentage, PositiveDecimal, PositiveFloat, PositiveInt
 
 
 class Code(Scalar[str]):

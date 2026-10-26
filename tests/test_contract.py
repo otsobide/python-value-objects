@@ -20,7 +20,7 @@ from tests.samples import SAMPLES, Args, Sample
 from tests.test_core import CORE_SAMPLES
 
 # The modules whose __all__ the package root re-exports; each family joins when its names are exported.
-FAMILIES = ("_core",)
+FAMILIES = ("_core", "numeric")
 # The public names only: the 0.x classes the root still re-exports outside __all__ must not shadow 1.0 classes.
 PUBLIC = {name: getattr(vo, name) for name in vo.__all__}
 EVAL_NS = {**PUBLIC, "Decimal": decimal.Decimal, "datetime": datetime, "uuid": uuid, "ipaddress": ipaddress}
