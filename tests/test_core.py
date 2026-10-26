@@ -5,6 +5,7 @@ from __future__ import annotations
 import abc
 import copy
 import datetime
+import decimal
 import enum
 import math
 import operator
@@ -1572,6 +1573,19 @@ class Tally(Scalar[int]):
     __add__ = binary_op(operator.add)
 
 
+TRAPPING = decimal.Context(prec=34, traps=[decimal.InvalidOperation, decimal.DivisionByZero, decimal.Overflow])
+
+
+class Amount(Scalar[Decimal]):
+    """Decimal arithmetic in a context that traps Overflow, as the decimal family does."""
+
+    accepts = (Decimal, int)
+    operand_types = (Decimal, int)
+    __mul__ = binary_op(TRAPPING.multiply)
+    __rmul__ = binary_op(TRAPPING.multiply, reflected=True)
+    __pos__ = unary_op(TRAPPING.plus)  # rounds to the context, so an exponent beyond Emax overflows
+
+
 DAY = datetime.timedelta(days=1)
 
 
@@ -1597,6 +1611,8 @@ DAY = datetime.timedelta(days=1)
         (lambda: Span(DAY) * 3, Span(3 * DAY)),
         (lambda: -Span(DAY), Span(-DAY)),
         (lambda: Tally(1) + Tally(2), Tally(3)),
+        (lambda: Amount(Decimal("1.5")) * 2, Amount(Decimal("3.0"))),
+        (lambda: 2 * Amount(Decimal("1.5")), Amount(Decimal("3.0"))),
     ],
 )
 def test_operators_build_the_left_operand_type(compute: Callable[[], Scalar[Any]], expected: Scalar[Any]) -> None:
@@ -1663,6 +1679,26 @@ def test_overflow_becomes_out_of_range_error(compute: Callable[[], Scalar[Any]],
     with pytest.raises(OutOfRangeError, match=f"^{vo.__name__}: result out of range: ") as info:
         compute()
     assert info.value.vo is vo and info.value.value == value and type(info.value.__cause__) is OverflowError
+
+
+MAX_AMOUNT, BEYOND_EMAX = Amount(Decimal("9e999999")), Amount(Decimal("1e1000000"))
+
+
+@pytest.mark.parametrize(
+    ("compute", "value"),
+    [
+        (lambda: MAX_AMOUNT * 10, (MAX_AMOUNT, 10)),
+        (lambda: 10 * MAX_AMOUNT, (MAX_AMOUNT, 10)),
+        (lambda: MAX_AMOUNT * MAX_AMOUNT, (MAX_AMOUNT, MAX_AMOUNT)),
+        (lambda: +BEYOND_EMAX, BEYOND_EMAX),
+    ],
+    ids=["mul", "rmul", "same-type", "unary"],
+)
+def test_a_trapped_decimal_overflow_becomes_out_of_range_error(compute: Callable[[], Amount], value: object) -> None:
+    """Review of #40: decimal.Overflow is an ArithmeticError but not an OverflowError, so it escaped the helpers."""
+    with pytest.raises(OutOfRangeError, match=r"^Amount: result out of range: decimal overflow$") as info:
+        compute()
+    assert info.value.vo is Amount and info.value.value == value and type(info.value.__cause__) is decimal.Overflow
 
 
 def test_in_place_operators_rebind_and_never_mutate() -> None:

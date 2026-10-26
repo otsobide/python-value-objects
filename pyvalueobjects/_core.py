@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import decimal
 import operator
 import re
 from abc import ABCMeta
@@ -397,6 +398,15 @@ def literal(regex: re.Pattern[str], convert: Callable[[str], R]) -> Callable[[st
     return parse
 
 
+# date/timedelta/float overflow, and decimal.Overflow (an ArithmeticError) from a context that traps it
+_OVERFLOW = (OverflowError, decimal.Overflow)
+
+
+def _overflow(exc: ArithmeticError, vo: type, value: object) -> OutOfRangeError:
+    detail = "decimal overflow" if isinstance(exc, decimal.Overflow) else exc  # str() of decimal.Overflow is cryptic
+    return OutOfRangeError(f"result out of range: {detail}", vo=vo, value=value)
+
+
 def binary_op(
     func: Callable[[Any, Any], Any],
     *,
@@ -408,7 +418,8 @@ def binary_op(
 
     The other operand may be the same concrete type (when ``same_type``) or a raw value whose exact
     type is in ``operands`` (default: the class's ``operand_types``, or none). Anything else returns
-    NotImplemented, so mixing VO types is a TypeError. Overflow becomes OutOfRangeError.
+    NotImplemented, so mixing VO types is a TypeError. Overflow (OverflowError, or decimal.Overflow
+    from a context that traps it) becomes OutOfRangeError.
     """
 
     def method(self: S, other: object) -> S:
@@ -421,8 +432,8 @@ def binary_op(
             return NotImplemented  # type: ignore[no-any-return]
         try:
             result = func(operand, self._value) if reflected else func(self._value, operand)
-        except OverflowError as exc:  # date/timedelta/float overflow
-            raise OutOfRangeError(f"result out of range: {exc}", vo=type(self), value=(self, other)) from exc
+        except _OVERFLOW as exc:
+            raise _overflow(exc, type(self), (self, other)) from exc
         return type(self)(result)
 
     return method
@@ -434,8 +445,8 @@ def unary_op(func: Callable[[Any], Any]) -> Callable[[S], S]:
     def method(self: S) -> S:
         try:
             result = func(self._value)
-        except OverflowError as exc:  # -timedelta.max
-            raise OutOfRangeError(f"result out of range: {exc}", vo=type(self), value=self) from exc
+        except _OVERFLOW as exc:  # -timedelta.max
+            raise _overflow(exc, type(self), self) from exc
         return type(self)(result)
 
     return method
