@@ -524,6 +524,26 @@ def test_make_cov_measures_branch_coverage_of_the_package() -> None:
     assert run["source"] == ["pyvalueobjects"]
 
 
+def test_coverage_reports_every_module_of_the_package(tmp_path: Path) -> None:
+    """Modules that nothing imports count as uncovered, also inside a subpackage without __init__.py.
+
+    The 0.x security subpackage has none, so its 14 never-imported modules were missing and the total
+    read 98 % instead of 69 % (#39 review).
+    """
+    stub, report = tmp_path / "stub.py", tmp_path / "coverage.json"
+    stub.write_text("import pyvalueobjects\n", encoding="utf-8")
+    env = {**os.environ, "COVERAGE_FILE": str(tmp_path / ".coverage")}
+    for args in (["run", str(stub)], ["json", "--fail-under=0", "-o", str(report)]):
+        run = subprocess.run(
+            [sys.executable, "-m", "coverage", *args], cwd=ROOT, env=env, capture_output=True, text=True, check=False
+        )
+        assert run.returncode == 0, run.stdout + run.stderr
+    omit = PYPROJECT["tool"]["coverage"]["run"].get("omit", [])
+    modules = {path.relative_to(ROOT).as_posix() for path in (ROOT / "pyvalueobjects").rglob("*.py")}
+    expected = {module for module in modules if not any(fnmatch.fnmatch(module, pattern) for pattern in omit)}
+    assert set(json.loads(report.read_text(encoding="utf-8"))["files"]) == expected
+
+
 def test_make_clean_removes_generated_paths_and_keeps_the_rest(tmp_path: Path) -> None:
     make_command = require("make")
     shutil.copy(ROOT / "Makefile", tmp_path)
