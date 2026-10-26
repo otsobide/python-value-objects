@@ -26,6 +26,7 @@ A collection of Value Objects to save time by generalizing types and format vali
     * [Negative or zero Int](#negative-or-zero-int)
     * [Nullable Negative or zero Int](#nullable-negative-or-zero-int)
     * [Float](#float)
+    * [Positive Float](#positive-float)
   * [String value-objects](#string-value-objects)
     * [String](#string)
     * [Nullable String](#nullable-string)
@@ -223,6 +224,23 @@ my_float_from_str = Float.from_str('9.5')
 # Getting raw value
 my_float.value() # returns -> 9.5
 my_float_from_int.value() # returns -> 9.0
+```
+
+### Positive Float
+
+A float value object that ensures the value is strictly greater than zero. Useful for representing amounts, measures, or any decimal value that must be positive.
+
+```python
+from pyvalueobjects import PositiveFloat
+
+# Creation
+my_float = PositiveFloat(9.5)
+
+# Getting raw value
+my_float.value() # returns -> 9.5
+
+# Creation
+my_float2 = PositiveFloat(0.0) # raises error
 ```
 
 ## String value-objects
