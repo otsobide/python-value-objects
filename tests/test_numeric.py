@@ -52,6 +52,16 @@ def members(root: type) -> list[Any]:
     return [pytest.param(cls, id=cls.__name__) for cls in CONCRETE if issubclass(cls, root)]
 
 
+def compute(expression: str) -> Any:
+    """Evaluates one of the expressions below (our own literals) with this module's names."""
+    return eval(expression, globals())
+
+
+def operand_name(obj: object) -> str:
+    """The type name an operator TypeError shows: C types outside builtins carry their module."""
+    return {Decimal: "decimal.Decimal"}.get(type(obj), type(obj).__name__)
+
+
 class Signal(enum.IntEnum):
     DOWN = -1
     UP = 1
@@ -343,17 +353,73 @@ def test_regression_X02_from_str_reads_only_ascii_digits(text: str) -> None:
     assert Int.from_str(" 12\n") == Int(12)
 
 
+# ------------------------------------------------------------------------------------------- Int: the digit limit
+
+LIMIT = 10**4300  # the smallest int with more digits than the default limit of 4300
+
+
+@pytest.mark.usefixtures("int_digit_limit")
+@pytest.mark.parametrize(
+    ("cls", "raw", "shown"),
+    [
+        (Int, LIMIT, "<int with 14285 bits>"),
+        (Int, -LIMIT, "<negative int with 14285 bits>"),
+        (PositiveInt, LIMIT * 7, "<int with 14288 bits>"),
+        (NegativeInt, -LIMIT, "<negative int with 14285 bits>"),
+    ],
+    ids=["Int", "Int-negative", "PositiveInt", "NegativeInt"],
+)
+def test_regression_X04_an_int_without_a_text_form_is_out_of_range(cls: type[Int], raw: int, shown: str) -> None:
+    """X04 (#34): 0.x accepted Int(10**5000), whose str_value() then raised a plain ValueError."""
+    with pytest.raises(OutOfRangeError) as info:
+        cls(raw)
+    assert (
+        str(info.value) == f"{cls.__name__}: must have at most 4300 digits (sys.get_int_max_str_digits()), got {shown}"
+    )
+    assert info.value.value == raw and not cls.is_valid(raw)
+
+
+@pytest.mark.usefixtures("int_digit_limit")
+@pytest.mark.parametrize("raw", [LIMIT - 1, 1 - LIMIT], ids=["positive", "negative"])
+def test_the_longest_int_round_trips_through_text(raw: int) -> None:
+    number = Int(raw)
+    assert len(str(number).lstrip("-")) == 4300 and eval(repr(number)) == number and Int.from_str(str(number)) == number
+    assert format(number, ",").count(",") == 1433
+
+
+@pytest.mark.usefixtures("int_digit_limit")
+def test_from_str_refuses_text_over_the_digit_limit() -> None:
+    with pytest.raises(InvalidFormatError, match=r"^Int: cannot parse '1111"):
+        Int.from_str("1" * 4301)
+    with pytest.raises(InvalidFormatError, match=r"^Int: cannot parse '0000"):
+        Int.from_str("0" * 4300 + "1")  # int() counts leading zeros
+
+
+@pytest.mark.usefixtures("int_digit_limit")
+@pytest.mark.parametrize("expression", ["Int(10**4299) * 10", "10 * Int(-(10**4299))", "Int(LIMIT - 1) + 1"])
+def test_an_operation_cannot_leave_the_digit_limit(expression: str) -> None:
+    with pytest.raises(OutOfRangeError, match=r"^Int: must have at most 4300 digits "):
+        compute(expression)
+
+
+@pytest.mark.parametrize(
+    ("limit", "accepted", "rejected"), [(640, 10**640 - 1, 10**640), (5000, LIMIT, 10**5000)], ids=["640", "5000"]
+)
+def test_the_digit_limit_follows_the_interpreter_setting(
+    int_digit_limit: int, limit: int, accepted: int, rejected: int
+) -> None:
+    sys.set_int_max_str_digits(limit)  # the fixture restores the setting
+    assert Int(accepted).value == accepted and str(Int(accepted)) == str(accepted)
+    with pytest.raises(OutOfRangeError, match=f"^Int: must have at most {limit} digits "):
+        Int(rejected)
+
+
+def test_without_a_digit_limit_every_int_is_accepted(int_digit_limit: int) -> None:
+    sys.set_int_max_str_digits(0)
+    assert Int.from_str(str(Int(10**5000))) == Int(10**5000)
+
+
 # ------------------------------------------------------------------------------------------- arithmetic
-
-
-def compute(expression: str) -> Any:
-    """Evaluates one of the expressions below (our own literals) with this module's names."""
-    return eval(expression, globals())
-
-
-def operand_name(obj: object) -> str:
-    """The type name an operator TypeError shows: C types outside builtins carry their module."""
-    return {Decimal: "decimal.Decimal"}.get(type(obj), type(obj).__name__)
 
 
 # (expression, expected): the result has the left operand's concrete type, even with a raw number on the left
@@ -451,72 +517,6 @@ def test_in_place_operators_rebind_and_never_mutate() -> None:
     total //= 2
     total %= 3
     assert total == PositiveInt(1) and original == PositiveInt(1) and type(total) is PositiveInt
-
-
-# ------------------------------------------------------------------------------------------- Int: the digit limit
-
-LIMIT = 10**4300  # the smallest int with more digits than the default limit of 4300
-
-
-@pytest.mark.usefixtures("int_digit_limit")
-@pytest.mark.parametrize(
-    ("cls", "raw", "shown"),
-    [
-        (Int, LIMIT, "<int with 14285 bits>"),
-        (Int, -LIMIT, "<negative int with 14285 bits>"),
-        (PositiveInt, LIMIT * 7, "<int with 14288 bits>"),
-        (NegativeInt, -LIMIT, "<negative int with 14285 bits>"),
-    ],
-    ids=["Int", "Int-negative", "PositiveInt", "NegativeInt"],
-)
-def test_regression_X04_an_int_without_a_text_form_is_out_of_range(cls: type[Int], raw: int, shown: str) -> None:
-    """X04 (#34): 0.x accepted Int(10**5000), whose str_value() then raised a plain ValueError."""
-    with pytest.raises(OutOfRangeError) as info:
-        cls(raw)
-    assert (
-        str(info.value) == f"{cls.__name__}: must have at most 4300 digits (sys.get_int_max_str_digits()), got {shown}"
-    )
-    assert info.value.value == raw and not cls.is_valid(raw)
-
-
-@pytest.mark.usefixtures("int_digit_limit")
-@pytest.mark.parametrize("raw", [LIMIT - 1, 1 - LIMIT], ids=["positive", "negative"])
-def test_the_longest_int_round_trips_through_text(raw: int) -> None:
-    number = Int(raw)
-    assert len(str(number).lstrip("-")) == 4300 and eval(repr(number)) == number and Int.from_str(str(number)) == number
-    assert format(number, ",").count(",") == 1433
-
-
-@pytest.mark.usefixtures("int_digit_limit")
-def test_from_str_refuses_text_over_the_digit_limit() -> None:
-    with pytest.raises(InvalidFormatError, match=r"^Int: cannot parse '1111"):
-        Int.from_str("1" * 4301)
-    with pytest.raises(InvalidFormatError, match=r"^Int: cannot parse '0000"):
-        Int.from_str("0" * 4300 + "1")  # int() counts leading zeros
-
-
-@pytest.mark.usefixtures("int_digit_limit")
-@pytest.mark.parametrize("expression", ["Int(10**4299) * 10", "10 * Int(-(10**4299))", "Int(LIMIT - 1) + 1"])
-def test_an_operation_cannot_leave_the_digit_limit(expression: str) -> None:
-    with pytest.raises(OutOfRangeError, match=r"^Int: must have at most 4300 digits "):
-        compute(expression)
-
-
-@pytest.mark.parametrize(
-    ("limit", "accepted", "rejected"), [(640, 10**640 - 1, 10**640), (5000, LIMIT, 10**5000)], ids=["640", "5000"]
-)
-def test_the_digit_limit_follows_the_interpreter_setting(
-    int_digit_limit: int, limit: int, accepted: int, rejected: int
-) -> None:
-    sys.set_int_max_str_digits(limit)  # the fixture restores the setting
-    assert Int(accepted).value == accepted and str(Int(accepted)) == str(accepted)
-    with pytest.raises(OutOfRangeError, match=f"^Int: must have at most {limit} digits "):
-        Int(rejected)
-
-
-def test_without_a_digit_limit_every_int_is_accepted(int_digit_limit: int) -> None:
-    sys.set_int_max_str_digits(0)
-    assert Int.from_str(str(Int(10**5000))) == Int(10**5000)
 
 
 # ------------------------------------------------------------------------------------------- extension
