@@ -405,12 +405,12 @@ my_int_array.value()  # returns -> [39]
 A list value object that can also be None, with type validation for its elements. Combines the validation of ArrayList with the flexibility of nullable values.
 
 ```python
-from pyvalueobjects import ArrayList
+from pyvalueobjects import NullableArrayList
 from pyvalueobjects import Int
 
 # Creation
-my_int_array = ArrayList(Int)([39])
-my_null_array = ArrayList(Int)(None)
+my_int_array = NullableArrayList(Int)([39])
+my_null_array = NullableArrayList(Int)(None)
 
 # Getting raw value
 my_int_array.value()  # returns -> [39]
