@@ -829,18 +829,21 @@ def test_component_rebuilds_a_subclass_with_extra_fields_from_the_kind_fields() 
 
 
 @pytest.mark.parametrize(
-    ("label", "origin", "message"),
+    ("field", "bad", "message"),
     [
-        ("a", Point(1, 2), "label must be Label, got str"),
-        (None, Point(1, 2), "label must be Label, got NoneType"),
-        (Label("a"), (1, 2), "origin must be Point, got tuple"),
-        (Label("a"), Label("a"), "origin must be Point, got Label"),
+        ("label", "a", "label must be Label, got str"),
+        ("label", None, "label must be Label, got NoneType"),
+        ("label", Point(1, 2), "label must be Label, got Point"),
+        ("origin", (1, 2), "origin must be Point, got tuple"),
+        ("origin", Label("a"), "origin must be Point, got Label"),
     ],
 )
-def test_component_requires_an_instance_for_a_composite(label: Any, origin: Any, message: str) -> None:
+def test_component_requires_an_instance_for_a_composite(field: str, bad: Any, message: str) -> None:
+    """The error carries the rejected argument itself (review of #40: `value in (label, origin)` did not check it)."""
+    args = {"label": Label("a"), "origin": Point(1, 2), field: bad}
     with pytest.raises(InvalidTypeError, match=f"^Parcel: {message}$") as info:
-        Parcel(label, origin)
-    assert info.value.vo is Parcel and info.value.value in (label, origin) and info.value.__cause__ is None
+        Parcel(**args)
+    assert info.value.vo is Parcel and info.value.value is bad and info.value.__cause__ is None
 
 
 @pytest.mark.parametrize(
