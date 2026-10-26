@@ -73,20 +73,13 @@ def test_regression_C08_C44_requires_python_is_a_project_field() -> None:
     assert python_floor() == (3, 11)
 
 
-def test_regression_C08_C44_installed_metadata_declares_requires_python(
-    metadata: importlib.metadata.PackageMetadata,
-) -> None:
-    """C08/C44 (#32): the 0.28.1 wheel had no Requires-Python, so pip installed it on any Python."""
-    assert metadata["Requires-Python"] == ">=3.11"
-
-
 @pytest.mark.parametrize(
     ("field", "expected"),
     [
         ("Name", PROJECT["name"]),
         ("Version", PROJECT["version"]),
         ("Summary", PROJECT["description"]),
-        ("Requires-Python", PROJECT.get("requires-python")),
+        ("Requires-Python", PROJECT["requires-python"]),  # C08/C44 (#32): the 0.28.1 wheel had none
         ("License-Expression", PROJECT["license"]),
         ("License-File", "LICENSE"),
         ("Description-Content-Type", "text/markdown"),
@@ -111,10 +104,9 @@ def test_the_library_has_no_runtime_dependencies(metadata: importlib.metadata.Pa
     assert metadata.get_all("Requires-Dist") is None
 
 
-def test_the_version_lives_only_in_pyproject(metadata: importlib.metadata.PackageMetadata) -> None:
+def test_the_version_lives_only_in_pyproject() -> None:
     import pyvalueobjects
 
-    assert metadata["Version"] == PROJECT["version"]
     assert not hasattr(pyvalueobjects, "__version__"), "read the version with importlib.metadata.version()"
 
 
@@ -283,13 +275,16 @@ import pytest
 class Report:
     def pytest_collection_finish(self, session):
         functions = [item for item in session.items if isinstance(item, pytest.Function)]
+        self.files = sorted({{item.nodeid.split("::")[0] for item in session.items}})
         self.modules = sorted({{item.module.__name__ for item in functions}})
 
 report = Report()
-code = pytest.main(["--collect-only", "-q", "-p", "no:cacheprovider"], plugins=[report])
+code = pytest.main(["--collect-only", "-q", "-p", "no:cacheprovider", *sys.argv[1:]], plugins=[report])
 import numbers
 fraction = str(fractions.Fraction(1, 3) + 1)
-print({REPORT_TAG!r} + json.dumps({{"numbers": numbers.__file__, "fraction": fraction, "modules": report.modules}}))
+print({REPORT_TAG!r} + json.dumps(
+    {{"numbers": numbers.__file__, "fraction": fraction, "files": report.files, "modules": report.modules}}
+))
 sys.exit(code)
 """
 
@@ -301,24 +296,25 @@ def collection_report(lines: list[str]) -> dict[str, Any]:
     return parsed
 
 
-@pytest.fixture(scope="module")
-def collection() -> list[str]:
-    """Output lines of a fresh `pytest --collect-only` run in a process that imported the stdlib numbers first."""
-    run = subprocess.run([sys.executable, "-c", COLLECT], cwd=ROOT, capture_output=True, text=True, check=False)
+def collect(*pytest_args: str) -> dict[str, Any]:
+    """The report of a fresh `pytest --collect-only` run in a process that imported the stdlib numbers first."""
+    run = subprocess.run(
+        [sys.executable, "-c", COLLECT, *pytest_args], cwd=ROOT, capture_output=True, text=True, check=False
+    )
     assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
-    return run.stdout.splitlines()
+    return collection_report(run.stdout.splitlines())
 
 
 @pytest.fixture(scope="module")
-def collected(collection: list[str]) -> set[str]:
-    """Test files that the collection run collected items from."""
-    return {line.split("::")[0] for line in collection if "::" in line}
+def collection() -> dict[str, Any]:
+    """The report of a collection run with this repository's configuration."""
+    return collect()
 
 
 @pytest.mark.parametrize("path", TEST_MODULES)
-def test_pytest_collects_every_test_module(collected: set[str], path: str) -> None:
+def test_pytest_collects_every_test_module(collection: dict[str, Any], path: str) -> None:
     """The 0.x unittest modules (*_test.py) run under pytest next to the new test_*.py modules."""
-    assert path in collected
+    assert path in collection["files"]
 
 
 @pytest.mark.parametrize(
@@ -374,6 +370,9 @@ def test_other_compile_time_warnings_still_fail() -> None:
 @pytest.mark.parametrize("option", ["-ra", "--strict-markers", "--strict-config"])
 def test_pytest_runs_strict(pytestconfig: pytest.Config, option: str) -> None:
     assert option in pytestconfig.getini("addopts")
+
+
+def test_pytest_xfail_is_strict(pytestconfig: pytest.Config) -> None:
     assert pytestconfig.getini("xfail_strict") is True
 
 
@@ -384,11 +383,17 @@ MAKE_TARGETS = sorted(m[1] for m in re.finditer(r"^([A-Za-z0-9_-]+)\s*:(?!=)", M
 PHONY = {name for m in re.finditer(r"^\.PHONY\s*:(?!=)(.*)$", MAKEFILE, re.MULTILINE) for name in m[1].split()}
 
 
+def require(tool: str) -> str:
+    """The path of a command-line tool; skips the calling test when it is not installed."""
+    path = shutil.which(tool)
+    if path is None:
+        pytest.skip(f"{tool} is not installed")
+    return path
+
+
 def make(*args: str, cwd: Path = ROOT) -> list[str]:
     """The commands `make` would run for `args`, printed with -n instead of being run."""
-    if shutil.which("make") is None:
-        pytest.skip("make is not installed")
-    run = subprocess.run(["make", "-n", *args], cwd=cwd, capture_output=True, text=True, check=False)
+    run = subprocess.run([require("make"), "-n", *args], cwd=cwd, capture_output=True, text=True, check=False)
     assert run.returncode == 0, run.stderr
     return [line for line in run.stdout.splitlines() if not line.startswith("make")]  # drops "Nothing to be done"
 
@@ -437,8 +442,7 @@ def test_make_cov_measures_branch_coverage_of_the_package() -> None:
 
 
 def test_make_clean_removes_generated_paths_and_keeps_the_rest(tmp_path: Path) -> None:
-    if shutil.which("make") is None:
-        pytest.skip("make is not installed")
+    make_command = require("make")
     shutil.copy(ROOT / "Makefile", tmp_path)
     for path in GENERATED_PATHS:
         if path.endswith("/"):
@@ -447,7 +451,7 @@ def test_make_clean_removes_generated_paths_and_keeps_the_rest(tmp_path: Path) -
             (tmp_path / path).touch()
     (tmp_path / ".venv").mkdir()
     (tmp_path / "keep.py").touch()
-    subprocess.run(["make", "clean"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run([make_command, "clean"], cwd=tmp_path, capture_output=True, check=True)
     assert sorted(path.name for path in tmp_path.iterdir()) == [".venv", "Makefile", "keep.py"]
 
 
@@ -463,20 +467,19 @@ def test_regression_C43_every_test_directory_is_a_package(directory: str) -> Non
         assert (ROOT / package / "__init__.py").is_file(), f"{package} is not a package"
 
 
-def test_regression_C43_test_modules_are_imported_under_the_tests_package(collection: list[str]) -> None:
+def test_regression_C43_test_modules_are_imported_under_the_tests_package(collection: dict[str, Any]) -> None:
     """C43 (#32): unittest discovery imported tests/numbers/int_test.py as `numbers.int_test`.
 
     The names come from the full collection run, not from this session, which a `-k` or a single file narrows.
     """
     expected = sorted(path.removesuffix(".py").replace("/", ".") for path in TEST_MODULES)
-    assert collection_report(collection)["modules"] == expected
+    assert collection["modules"] == expected
 
 
-def test_regression_C43_collection_keeps_the_stdlib_numbers_module(collection: list[str]) -> None:
+def test_regression_C43_collection_keeps_the_stdlib_numbers_module(collection: dict[str, Any]) -> None:
     """With `decimal` imported first, 0.28.1 discovery failed with "'numbers' is not a package"."""
-    report = collection_report(collection)
-    assert Path(report["numbers"]).parent == Path(sysconfig.get_path("stdlib"))
-    assert report["fraction"] == "4/3"
+    assert Path(collection["numbers"]).parent == Path(sysconfig.get_path("stdlib"))
+    assert collection["fraction"] == "4/3"
     import numbers
 
     assert Path(numbers.__file__).parent == Path(sysconfig.get_path("stdlib"))
@@ -491,7 +494,7 @@ def test_regression_C43_collection_keeps_the_stdlib_numbers_module(collection: l
 )
 def test_regression_C43_collection_report_keeps_paths_with_spaces(path: str) -> None:
     """The report was one space-separated line, so a stdlib path with a space was cut (#39 review)."""
-    report = {"numbers": path, "fraction": "4/3", "modules": ["tests.test_project"]}
+    report = {"numbers": path, "fraction": "4/3", "files": ["tests/test_project.py"], "modules": ["tests.test_project"]}
     assert collection_report(["tests/test_project.py::test_x", REPORT_TAG + json.dumps(report)]) == report
 
 
@@ -688,15 +691,7 @@ def test_regression_C55_default_pytest_discovery_finds_every_test_module(tmp_pat
     """An empty config gives pytest's defaults, which already collect both test_*.py and *_test.py."""
     ini = tmp_path / "pytest.ini"
     ini.write_text("[pytest]\n", encoding="utf-8")
-    run = subprocess.run(
-        [sys.executable, "-m", "pytest", "-c", str(ini), "--rootdir", str(ROOT), "--collect-only", "-q", "tests"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
-    assert set(TEST_MODULES) <= {line.split("::")[0] for line in run.stdout.splitlines() if "::" in line}
+    assert collect("-c", str(ini), "--rootdir", str(ROOT), "tests")["files"] == TEST_MODULES
 
 
 @pytest.mark.parametrize("pattern", PYTEST_INI.get("python_files", ["test_*.py"]))
