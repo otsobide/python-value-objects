@@ -1,5 +1,42 @@
 [build-system]
-requires = [
-    'setuptools',
-    'wheel'
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyvalueobjects"
+version = "0.28.1"
+description = "Immutable, validated value objects for domain-driven design: numbers, text, identifiers, security formats, network, money and time."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Javier Parada", email = "javierparada@pm.me" }]
+keywords = ["value-objects", "ddd", "domain-driven-design", "validation", "money", "immutable"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
 ]
+dependencies = []
+
+[project.urls]
+Homepage = "https://codeberg.org/n1nj4t4nuk1/python-value-objects"     # primary, as the README declares
+Mirror = "https://github.com/otsobide/python-value-objects"           # the `origin` remote
+Issues = "https://github.com/otsobide/python-value-objects/issues"    # where the 1.0 issues live
+Changelog = "https://codeberg.org/n1nj4t4nuk1/python-value-objects/src/branch/main/CHANGELOG.md"
+
+# Transitional until the 0.x code is gone: the legacy subpackages have no __init__.py,
+# so they are found as namespace packages (the default for packages.find in pyproject.toml).
+[tool.setuptools.packages.find]
+include = ["pyvalueobjects*"]
+
+[tool.setuptools.package-data]
+pyvalueobjects = ["py.typed"]
