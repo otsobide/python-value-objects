@@ -4,6 +4,7 @@ The metadata tests read the installed distribution, so the project must be insta
 checkout (`uv run pytest` does that).
 """
 
+import decimal
 import fnmatch
 import importlib.metadata
 import importlib.util
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import settings
 
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -503,6 +505,28 @@ def test_pytest_runs_strict(pytestconfig: pytest.Config, option: str) -> None:
 
 def test_pytest_xfail_is_strict(pytestconfig: pytest.Config) -> None:
     assert pytestconfig.getini("xfail_strict") is True
+
+
+def test_every_test_runs_under_a_hostile_decimal_context() -> None:
+    """tests/conftest.py: library code that relied on the caller's decimal context would fail here."""
+    context = decimal.getcontext()
+    assert (context.prec, context.rounding) == (3, decimal.ROUND_FLOOR)
+    assert not any(context.traps.values())
+
+
+@pytest.mark.parametrize(("profile", "examples"), [("dev", 100), ("ci", 1000)])
+def test_hypothesis_profiles(profile: str, examples: int) -> None:
+    assert settings.get_profile(profile).max_examples == examples
+
+
+def test_ci_hypothesis_profile_is_reproducible() -> None:
+    ci = settings.get_profile("ci")
+    assert ci.derandomize is True and ci.deadline is None
+
+
+def test_hypothesis_profile_comes_from_the_environment() -> None:
+    expected = settings.get_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
+    assert settings().max_examples == expected.max_examples and settings().derandomize == expected.derandomize
 
 
 # ------------------------------------------------------------------------------------------- Makefile
