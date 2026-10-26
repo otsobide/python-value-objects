@@ -1008,6 +1008,17 @@ def test_agents_md_only_mentions_existing_paths(path: str) -> None:
     assert (ROOT / path).exists()
 
 
+def test_regression_C43_agents_md_warns_about_test_packages_named_after_stdlib_modules() -> None:
+    """`cd tests && python -m pytest` still lets tests/numbers shadow the stdlib `numbers` (#32 C43, #39 review)."""
+    tests = ROOT / "tests"
+    shadowing = sorted(
+        p.name for p in tests.iterdir() if (p / "__init__.py").is_file() and p.name in sys.stdlib_module_names
+    )
+    for name in shadowing:
+        assert f"`tests/{name}` package shadows the stdlib `{name}` module" in AGENTS
+        assert "Run the tests from the repository root." in AGENTS
+
+
 def test_agents_md_states_the_supported_python_range() -> None:
     (major, first), *_, (_, last) = classifier_versions()
     assert f"Python {major}.{first}–{major}.{last}" in AGENTS
