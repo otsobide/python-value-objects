@@ -10,7 +10,9 @@ import importlib.util
 import json
 import re
 import subprocess
+import sys
 import tomllib
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -258,3 +260,88 @@ def test_generated_paths_are_ignored_by_git(path: str) -> None:
     """Directories carry a trailing slash, so git matches them as directories even when they do not exist."""
     check = subprocess.run(["git", "check-ignore", "--quiet", "--no-index", path], cwd=ROOT, check=False)
     assert check.returncode == 0, f"{path} is not in .gitignore"
+
+
+# ------------------------------------------------------------------------------------------- test configuration
+
+TEST_MODULES = sorted(
+    path.relative_to(ROOT).as_posix()
+    for path in (ROOT / "tests").rglob("*.py")
+    if path.name.startswith("test_") or path.name.endswith("_test.py")
+)
+
+
+@pytest.fixture(scope="module")
+def collected() -> set[str]:
+    """Test files that a fresh `pytest --collect-only` run collects items from."""
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    return {line.split("::")[0] for line in run.stdout.splitlines() if "::" in line}
+
+
+@pytest.mark.parametrize("path", TEST_MODULES)
+def test_pytest_collects_every_test_module(collected: set[str], path: str) -> None:
+    """The 0.x unittest modules (*_test.py) run under pytest next to the new test_*.py modules."""
+    assert path in collected
+
+
+@pytest.mark.parametrize(
+    "category",
+    [UserWarning, DeprecationWarning, PendingDeprecationWarning, FutureWarning, RuntimeWarning, ResourceWarning],
+)
+def test_warnings_are_errors(category: type[Warning]) -> None:
+    with pytest.raises(category, match="unexpected"):
+        warnings.warn("unexpected", category, stacklevel=1)
+
+
+@pytest.mark.parametrize(
+    ("category", "message"),
+    [
+        (DeprecationWarning, "invalid escape sequence '\\d'"),  # Python 3.11
+        (SyntaxWarning, "invalid escape sequence '\\d'"),  # Python 3.12 to 3.14
+        (SyntaxWarning, '"\\d" is an invalid escape sequence. Did you mean "\\\\d"?'),  # Python 3.15
+    ],
+)
+def test_transitional_filter_silences_invalid_escape_sequences(category: type[Warning], message: str) -> None:
+    """The legacy cpe.py regex is not a raw string; the filter goes away when cpe.py is replaced."""
+    with warnings.catch_warnings(record=True) as caught:  # keeps the configured filters, records what passes them
+        warnings.warn(message, category, stacklevel=1)
+    assert caught == []
+
+
+@pytest.mark.parametrize(
+    ("category", "message"),
+    [
+        (SyntaxWarning, "'return' in a 'finally' block"),
+        (DeprecationWarning, "datetime.datetime.utcnow() is deprecated"),
+        (UserWarning, "invalid escape sequence '\\d'"),
+        (RuntimeWarning, "invalid escape sequence '\\d'"),
+    ],
+)
+def test_transitional_filter_silences_nothing_else(category: type[Warning], message: str) -> None:
+    with pytest.raises(category):
+        warnings.warn(message, category, stacklevel=1)
+
+
+def test_invalid_escape_sequences_compile_on_every_supported_python() -> None:
+    code = compile("PATTERN = '[a-z\\d]+'", "legacy.py", "exec")
+    namespace: dict[str, object] = {}
+    exec(code, namespace)
+    assert namespace["PATTERN"] == "[a-z\\d]+"
+
+
+def test_other_compile_time_warnings_still_fail() -> None:
+    with pytest.raises(SyntaxError, match='"is" with'):
+        compile("1 is 1", "module.py", "exec")
+
+
+@pytest.mark.parametrize("option", ["-ra", "--strict-markers", "--strict-config"])
+def test_pytest_runs_strict(pytestconfig: pytest.Config, option: str) -> None:
+    assert option in pytestconfig.getini("addopts")
+    assert pytestconfig.getini("xfail_strict") is True

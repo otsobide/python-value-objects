@@ -50,3 +50,16 @@ include = ["pyvalueobjects*"]
 
 [tool.setuptools.package-data]
 pyvalueobjects = ["py.typed"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]  # transitional: the 0.x unittest modules are named *_test.py
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+xfail_strict = true
+filterwarnings = [
+    "error",
+    # transitional: the legacy cpe.py regex has invalid escapes (a DeprecationWarning on 3.11, reworded on 3.15)
+    "ignore:invalid escape sequence:DeprecationWarning",
+    "ignore:.*invalid escape sequence:SyntaxWarning",
+]
