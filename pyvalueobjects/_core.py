@@ -277,7 +277,9 @@ class ValueObject(metaclass=ValueObjectMeta):
 # ----------------------------------------------------------------------------------------------- Scalar
 
 
-_PLAIN = (int, float, str)  # subclasses of these (IntEnum, StrEnum members) are accepted as the plain type
+# Instances of subclasses of these (IntEnum, StrEnum members) are accepted as the plain type, converted by
+# the base type's own method, so an overridden __int__, __float__ or __str__ cannot change the value.
+_PLAIN: dict[type, Callable[[Any], Any]] = {int: int.__int__, float: float.__float__, str: str.__str__}
 
 
 class Scalar(ValueObject, Generic[T], abstract=True):
@@ -319,7 +321,7 @@ class Scalar(ValueObject, Generic[T], abstract=True):
             if plain is None or kind is bool:
                 expected = " or ".join(t.__name__ for t in cls.accepts)
                 raise InvalidTypeError(f"expected {expected}, got {kind.__name__}", vo=cls, value=raw)
-            raw = str.__str__(raw) if plain is str else plain(raw)
+            raw = _PLAIN[plain](raw)
         return cls._guard(cls._convert, raw)
 
     @classmethod

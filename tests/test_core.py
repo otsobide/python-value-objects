@@ -911,6 +911,21 @@ class Heavy(float):
     pass
 
 
+class Liar(int):
+    def __int__(self) -> int:
+        return 42
+
+
+class Broken(int):
+    def __int__(self) -> Any:
+        return "not an int"
+
+
+class Sinker(float):
+    def __float__(self) -> float:
+        return 99.0
+
+
 class Tagged(ValueObject):
     __slots__ = ("code", "count")
     code: Code
@@ -1001,6 +1016,10 @@ def test_type_gate_rejects_types_not_accepted(cls: type[Scalar[Any]], raw: Any, 
         (Ratio, Heavy(1.5), 1.5),
         (Code, Shade.RED, "RED"),
         (Code, Loud("q"), "Q"),  # the str value, not the overridden __str__
+        (Count, Liar(5), 5),  # regression (review of #40): the int value, not the overridden __int__
+        (Count, Broken(5), 5),  # ... whose non-int result used to raise a bare TypeError
+        (Ratio, Liar(5), 5.0),
+        (Ratio, Sinker(1.5), 1.5),  # the float value, not the overridden __float__
     ],
 )
 def test_instances_of_int_float_str_subclasses_become_the_plain_type(
