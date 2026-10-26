@@ -6,6 +6,7 @@ import abc
 import copy
 import datetime
 import enum
+import math
 import operator
 import pickle
 import re
@@ -13,6 +14,7 @@ import sys
 import unittest
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError, dataclass
+from decimal import Decimal
 from fractions import Fraction
 from typing import Any
 from unittest import mock
@@ -23,15 +25,19 @@ from hypothesis import strategies as st
 
 import pyvalueobjects
 from pyvalueobjects._core import (
+    Bounded,
+    Bounds,
     CurrencyMismatchError,
     InvalidFormatError,
     InvalidTypeError,
     OutOfRangeError,
     PrecisionError,
     Scalar,
+    Sized,
     ValueObject,
     ValueObjectError,
     ValueObjectMeta,
+    check_range,
     literal,
     show,
 )
@@ -1219,3 +1225,246 @@ def test_literal_errors_become_invalid_format_errors_in_from_str(text: str) -> N
     with pytest.raises(InvalidFormatError, match=f"^Whole: cannot parse {re.escape(show(text))}$") as info:
         Whole.from_str(text)
     assert type(info.value.__cause__) is ValueError and info.value.value == text
+
+
+# ------------------------------------------------------------------------------------------- constraints
+
+
+@pytest.mark.parametrize(
+    ("measured", "bounds", "message"),
+    [
+        (1, {"gt": 0}, None),
+        (0, {"gt": 0}, "value must be > 0, got 0"),
+        (0, {"ge": 0}, None),
+        (-1, {"ge": 0}, "value must be >= 0, got -1"),
+        (9, {"lt": 10}, None),
+        (10, {"lt": 10}, "value must be < 10, got 10"),
+        (10, {"le": 10}, None),
+        (11, {"le": 10}, "value must be <= 10, got 11"),
+        (5, {"gt": 0, "ge": 1, "lt": 10, "le": 9}, None),
+        (-1, {"gt": 0, "ge": 1, "lt": 10, "le": 9}, "value must be > 0, got -1"),  # checked in gt, ge, lt, le order
+        (0.5, {"ge": 1, "le": 0}, "value must be >= 1, got 0.5"),
+        (99, {}, None),
+        (Decimal("0.10"), {"gt": Decimal("0.1")}, "value must be > 0.1, got Decimal('0.10')"),
+        (Fraction(1, 3), {"le": Fraction(1, 4)}, "value must be <= 1/4, got Fraction(1, 3)"),
+        (
+            datetime.date(2024, 1, 1),
+            {"ge": datetime.date(2024, 1, 2)},
+            "value must be >= 2024-01-02, got datetime.date(2024, 1, 1)",
+        ),
+        (datetime.timedelta(0), {"gt": datetime.timedelta(0)}, "value must be > 0:00:00, got datetime.timedelta(0)"),
+        ("b", {"lt": "b"}, "value must be < b, got 'b'"),
+    ],
+)
+def test_check_range(measured: Any, bounds: dict[str, Any], message: str | None) -> None:
+    if message is None:
+        check_range(Thing, measured, **bounds)
+        return
+    with pytest.raises(OutOfRangeError) as info:
+        check_range(Thing, measured, **bounds, value="raw")
+    err = info.value
+    assert type(err) is OutOfRangeError and str(err) == f"Thing: {message}"
+    assert (err.reason, err.vo, err.value) == (message, Thing, "raw")
+
+
+def test_check_range_names_what_it_measures_and_cuts_long_values() -> None:
+    long = "x" * 100
+    with pytest.raises(OutOfRangeError) as info:
+        check_range(Thing, long, le="xxx", what="text")
+    assert info.value.reason == f"text must be <= xxx, got {show(long)}" and len(show(long)) == 80
+    assert info.value.value is None  # nothing given
+
+
+@pytest.mark.parametrize("bound", ["gt", "ge", "lt", "le"])
+def test_check_range_rejects_nan_for_every_bound(bound: str) -> None:
+    with pytest.raises(OutOfRangeError, match=r", got nan$"):
+        check_range(Thing, float("nan"), **{bound: 0})
+
+
+@given(st.integers(), st.integers(), st.integers())
+def test_check_range_agrees_with_the_comparisons(measured: int, low: int, high: int) -> None:
+    try:
+        check_range(Thing, measured, ge=low, le=high)
+    except OutOfRangeError:
+        assert not low <= measured <= high
+    else:
+        assert low <= measured <= high
+
+
+class Age(Bounded[int]):
+    accepts = (int,)
+    ge = 0
+    le = 150
+
+
+class Adult(Age):
+    ge = 18  # overrides one bound, inherits le
+
+
+class Probability(Bounded[float]):
+    accepts = (float, int)
+    ge = 0
+    le = 1
+
+    @classmethod
+    def _convert(cls, raw: float) -> float:
+        return float(raw)
+
+
+class Future(Bounded[datetime.date]):
+    accepts = (datetime.date,)
+    gt = datetime.date(2026, 1, 1)
+
+
+class Timeout(Bounded[datetime.timedelta]):
+    accepts = (datetime.timedelta,)
+    gt = datetime.timedelta(0)
+    lt = datetime.timedelta(hours=1)
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw"),
+    [
+        (Age, 0),
+        (Age, 150),
+        (Adult, 18),
+        (Probability, 0),
+        (Probability, 1.0),
+        (Future, datetime.date(2026, 1, 2)),
+        (Timeout, datetime.timedelta(minutes=59)),
+    ],
+)
+def test_bounded_accepts_values_within_the_bounds(cls: type[Bounded[Any]], raw: Any) -> None:
+    assert cls(raw).value == raw
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "message"),
+    [
+        (Age, -1, "Age: value must be >= 0, got -1"),
+        (Age, 151, "Age: value must be <= 150, got 151"),
+        (Adult, 17, "Adult: value must be >= 18, got 17"),
+        (Adult, 151, "Adult: value must be <= 150, got 151"),
+        (Probability, 1.5, "Probability: value must be <= 1, got 1.5"),
+        (Future, datetime.date(2026, 1, 1), "Future: value must be > 2026-01-01, got datetime.date(2026, 1, 1)"),
+        (
+            Timeout,
+            datetime.timedelta(hours=1),
+            "Timeout: value must be < 1:00:00, got datetime.timedelta(seconds=3600)",
+        ),
+    ],
+)
+def test_bounded_rejects_values_outside_the_bounds(cls: type[Bounded[Any]], raw: Any, message: str) -> None:
+    with pytest.raises(OutOfRangeError) as info:
+        cls(raw)
+    assert str(info.value) == message and info.value.vo is cls and info.value.value == cls._convert(raw)
+    assert not cls.is_valid(raw)
+
+
+def test_bounded_float_rejects_nan() -> None:
+    with pytest.raises(OutOfRangeError, match=r"^Probability: value must be >= 0, got nan$") as info:
+        Probability(float("nan"))
+    assert math.isnan(info.value.value)  # type: ignore[arg-type]
+
+
+def test_bounds_run_after_the_type_gate() -> None:
+    with pytest.raises(InvalidTypeError, match=r"^Age: expected int, got str$"):
+        Age("5")
+
+
+def test_bounded_keeps_the_scalar_behaviour() -> None:
+    assert Adult(Age(30)) == Adult(30) and Age(30) != Adult(30) and Age(20) < Age(30)
+    with pytest.raises(OutOfRangeError):
+        Adult(Age(10))  # unwrapped, then checked against the target's bounds
+
+
+class Reading(Bounds, ValueObject):
+    """A composite that bounds one of its fields with the Bounds mixin."""
+
+    __slots__ = ("amount", "unit")
+
+    def __init__(self, amount: int, unit: str) -> None:
+        type(self)._check_bounds(amount, value=(amount, unit))
+        self._set(amount=amount, unit=unit)
+
+
+class Kelvin(Reading):
+    ge = 0
+
+
+def test_bounds_mixin_on_a_composite() -> None:
+    assert Reading(-5, "C").amount == -5 and Kelvin(0, "K") == Kelvin(0, "K")
+    with pytest.raises(OutOfRangeError, match=r"^Kelvin: value must be >= 0, got -1$") as info:
+        Kelvin(-1, "K")
+    assert info.value.value == (-1, "K") and not hasattr(Kelvin(1, "K"), "__dict__")
+
+
+class Name(Sized[str]):
+    accepts = (str,)
+    min_length = 1
+    max_length = 5
+
+
+class Trimmed(Name):
+    """Normalizes before its parent runs, so the length is measured on the stripped text."""
+
+    @classmethod
+    def _validate(cls, value: str) -> str:
+        return super()._validate(value.strip())
+
+
+class Pair(Sized[tuple[int, ...]]):
+    accepts = (tuple, list)
+    min_length = 2
+    max_length = 2
+
+    @classmethod
+    def _convert(cls, raw: Any) -> tuple[int, ...]:
+        return tuple(raw)
+
+
+class Anything(Sized[str]):
+    accepts = (str,)
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "value"),
+    [
+        (Name, "a", "a"),
+        (Name, "abcde", "abcde"),
+        (Trimmed, "  ab  ", "ab"),
+        (Pair, [1, 2], (1, 2)),
+        (Anything, "", ""),
+        (Anything, "x" * 10_000, "x" * 10_000),
+    ],
+)
+def test_sized_accepts_lengths_within_the_limits(cls: type[Sized[Any]], raw: Any, value: Any) -> None:
+    assert cls(raw).value == value
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "message", "value"),
+    [
+        (Name, "", "Name: length must be >= 1, got 0", ""),
+        (Name, "abcdef", "Name: length must be <= 5, got 6", "abcdef"),
+        (Trimmed, "   ", "Trimmed: length must be >= 1, got 0", ""),
+        (Trimmed, " abcdef ", "Trimmed: length must be <= 5, got 6", "abcdef"),
+        (Pair, (1,), "Pair: length must be >= 2, got 1", (1,)),
+        (Pair, [1, 2, 3], "Pair: length must be <= 2, got 3", (1, 2, 3)),
+    ],
+)
+def test_sized_rejects_lengths_outside_the_limits(cls: type[Sized[Any]], raw: Any, message: str, value: Any) -> None:
+    with pytest.raises(OutOfRangeError) as info:
+        cls(raw)
+    assert str(info.value) == message and info.value.value == value  # the value itself, not its length
+
+
+@given(st.text(max_size=8))
+def test_sized_is_valid_agrees_with_the_length(text: str) -> None:
+    assert Name.is_valid(text) is (1 <= len(text) <= 5)
+
+
+@pytest.mark.parametrize("cls", [Bounded, Sized])
+def test_constraint_bases_are_abstract(cls: type[Scalar[Any]]) -> None:
+    with pytest.raises(TypeError, match=f"^{cls.__name__} is abstract"):
+        cls(1)

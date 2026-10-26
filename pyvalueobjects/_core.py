@@ -10,12 +10,15 @@ from dataclasses import FrozenInstanceError
 from typing import Any, ClassVar, Generic, Self, TypeVar
 
 __all__ = [
+    "Bounded",
+    "Bounds",
     "CurrencyMismatchError",
     "InvalidFormatError",
     "InvalidTypeError",
     "OutOfRangeError",
     "PrecisionError",
     "Scalar",
+    "Sized",
     "ValueObject",
     "ValueObjectError",
     "ValueObjectMeta",
@@ -67,6 +70,28 @@ class OutOfRangeError(ValueObjectError):
 
 class CurrencyMismatchError(ValueObjectError):
     """An operation combined Money values in different currencies."""
+
+
+def check_range(
+    vo: type,
+    measured: Any,
+    *,
+    gt: Any = None,
+    ge: Any = None,
+    lt: Any = None,
+    le: Any = None,
+    what: str = "value",
+    value: object = None,
+) -> None:
+    """Raise OutOfRangeError unless ``measured`` satisfies every bound that is not None."""
+    for bound, holds, symbol in (
+        (gt, operator.gt, ">"),
+        (ge, operator.ge, ">="),
+        (lt, operator.lt, "<"),
+        (le, operator.le, "<="),
+    ):
+        if bound is not None and not holds(measured, bound):
+            raise OutOfRangeError(f"{what} must be {symbol} {bound}, got {show(measured)}", vo=vo, value=value)
 
 
 # ----------------------------------------------------------------------------------------------- ValueObject
@@ -297,6 +322,49 @@ class Scalar(ValueObject, Generic[T], abstract=True):
     def __repr__(self) -> str:
         shown = str(self) if str in self.accepts else self._value
         return f"{type(self).__name__}({shown!r})"
+
+
+# ----------------------------------------------------------------------------------------------- constraints
+
+
+class Bounds:
+    """Declarative ``gt`` / ``ge`` / ``lt`` / ``le`` for anything orderable. Shared by Bounded scalars
+    and composites (``class Price(Money): ge = 0``)."""
+
+    __slots__ = ()
+    gt: ClassVar[Any] = None
+    ge: ClassVar[Any] = None
+    lt: ClassVar[Any] = None
+    le: ClassVar[Any] = None
+
+    @classmethod
+    def _check_bounds(cls, measured: Any, value: object = None) -> None:
+        check_range(
+            cls, measured, gt=cls.gt, ge=cls.ge, lt=cls.lt, le=cls.le, value=measured if value is None else value
+        )
+
+
+class Bounded(Bounds, Scalar[T], abstract=True):
+    """Scalar whose value must respect gt / ge / lt / le."""
+
+    @classmethod
+    def _validate(cls, value: T) -> T:
+        value = super()._validate(value)
+        cls._check_bounds(value)
+        return value
+
+
+class Sized(Scalar[T], abstract=True):
+    """Scalar whose ``len(value)`` must respect ``min_length`` / ``max_length`` (inclusive)."""
+
+    min_length: ClassVar[int | None] = None
+    max_length: ClassVar[int | None] = None
+
+    @classmethod
+    def _validate(cls, value: T) -> T:
+        value = super()._validate(value)
+        check_range(cls, len(value), ge=cls.min_length, le=cls.max_length, what="length", value=value)  # type: ignore[arg-type]
+        return value
 
 
 # ----------------------------------------------------------------------------------------------- helpers
