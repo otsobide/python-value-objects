@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents working with code in this reposi
 
 ## Project
 
-`pyvalueobjects` is a dependency-free Python library of validated value objects, published to PyPI. Packaging metadata and the version live only in `pyproject.toml` (PEP 621, setuptools backend). The dev tools (pytest, pytest-cov, hypothesis, mypy, ruff) form the `dev` dependency group, pinned by the committed `uv.lock`. The primary repository is on Codeberg; GitHub is a mirror.
+`pyvalueobjects` is a dependency-free Python library of validated value objects, published to PyPI. Packaging metadata and the version live only in `pyproject.toml` (PEP 621, setuptools backend); `MANIFEST.in` keeps the tests out of the sdist. The dev tools (pytest, pytest-cov, hypothesis, mypy, ruff) form the `dev` dependency group, pinned by the committed `uv.lock`. The primary repository is on Codeberg; GitHub is a mirror.
 
 ## Commands
 

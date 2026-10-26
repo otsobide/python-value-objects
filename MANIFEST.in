@@ -1,0 +1,3 @@
+# The sdist ships the library only. setuptools would add tests/test*.py by default, but the tests read the
+# Makefile, the CI workflow, AGENTS.md and uv.lock and call git and make: run them from a checkout or an export.
+prune tests

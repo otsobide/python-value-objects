@@ -8,11 +8,13 @@ import fnmatch
 import importlib.metadata
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import sysconfig
+import tarfile
 import tomllib
 import warnings
 from collections.abc import Callable
@@ -167,6 +169,33 @@ def test_regression_C45_every_package_directory_is_shipped(package: str) -> None
     assert not any(fnmatch.fnmatchcase(package, pattern) for pattern in find.get("exclude", []))
     is_regular = (ROOT.joinpath(*package.split(".")) / "__init__.py").is_file()
     assert is_regular or find.get("namespaces", True), f"{package} has no __init__.py and namespaces are disabled"
+
+
+def uv_build(source: Path, out_dir: Path, *args: str) -> None:
+    """Build `source` into `out_dir` with uv, offline from the cached build backend when the cache has it."""
+    uv = os.environ.get("UV") or require("uv")  # `uv run` exports the uv that runs the suite
+    for network in (["--offline"], []):
+        command = [uv, "build", *network, "--quiet", "--out-dir", str(out_dir), *args, str(source)]
+        run = subprocess.run(command, capture_output=True, text=True, check=False)
+        if run.returncode == 0:
+            return
+    pytest.fail(f"uv build failed: {run.stderr[-2000:]}")
+
+
+def test_sdist_ships_the_library_and_no_tests(tmp_path: Path) -> None:
+    """setuptools adds tests/test*.py to an sdist by default, and alone they fail at collection (#39 review)."""
+    uv_build(export(tmp_path / "export"), tmp_path / "dist", "--sdist")
+    [sdist] = (tmp_path / "dist").glob("*.tar.gz")
+    with tarfile.open(sdist) as archive:
+        files = {member.name.split("/", 1)[1] for member in archive.getmembers() if member.isfile()}
+    library = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "pyvalueobjects").rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts
+    }
+    generated = {"PKG-INFO", "setup.cfg"}  # setuptools writes both, and the egg-info directory
+    sources = {"LICENSE", "MANIFEST.in", "README.md", "pyproject.toml"}
+    assert {path for path in files if not path.startswith(f"{DISTRIBUTION}.egg-info/")} == library | generated | sources
 
 
 # ------------------------------------------------------------------------------------------- development environment
