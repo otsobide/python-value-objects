@@ -691,6 +691,7 @@ def test_component_relabels_errors_with_the_composite_and_field_name(
 
 class Count(Scalar[int]):
     accepts = (int,)
+    _parse_str = staticmethod(int)
 
 
 class Small(Count):
@@ -704,6 +705,7 @@ class Small(Count):
 
 class Ratio(Scalar[float]):
     accepts = (float, int)
+    _parse_str = staticmethod(float)
 
     @classmethod
     def _convert(cls, raw: float) -> float:
@@ -733,7 +735,7 @@ class ShortCode(Code):
 
 
 class Hex(Scalar[int]):
-    """Takes an int or hexadecimal text."""
+    """Takes an int or hexadecimal text; str() is the hexadecimal text, so repr() shows it too."""
 
     accepts = (int, str)
 
@@ -741,9 +743,13 @@ class Hex(Scalar[int]):
     def _convert(cls, raw: int | str) -> int:
         return int(raw, 16) if isinstance(raw, str) else raw
 
+    def __str__(self) -> str:
+        return format(self._value, "x")
+
 
 class Day(Scalar[datetime.date]):
     accepts = (datetime.date,)
+    _parse_str = staticmethod(datetime.date.fromisoformat)
 
 
 class Reciprocal(Scalar[Fraction]):
@@ -785,6 +791,7 @@ class Tagged(ValueObject):
 
 SCALARS = [Count(0), Count(-7), Count(2**100), Small(3), Ratio(0.5), Ratio(2), Code(" ab "), ShortCode("x")]
 SCALARS += [Hex(255), Hex("10"), Day(datetime.date(2024, 2, 29))]
+SCALAR_EVAL = {**globals(), "datetime": datetime}
 
 
 @pytest.fixture(params=SCALARS, ids=repr)
@@ -983,6 +990,8 @@ def test_scalar_round_trips(scalar: Scalar[Any]) -> None:
     for protocol in PROTOCOLS:
         assert pickle.loads(pickle.dumps(scalar, protocol)) == scalar
     assert copy.copy(scalar) is scalar and copy.deepcopy(scalar) is scalar
+    assert eval(repr(scalar), SCALAR_EVAL) == scalar  # our own repr: safe to evaluate
+    assert cls.from_str(str(scalar)) == scalar
     assert scalar.replace(value=scalar.value) == scalar and cls.from_optional(scalar.value) == scalar
     assert cls.from_optional(None) is None and cls.is_valid(scalar.value)
 
@@ -998,13 +1007,92 @@ def test_scalars_equal_only_within_one_type() -> None:
 @given(st.integers())
 def test_int_scalar_properties(number: int) -> None:
     count = Count(number)
-    assert count.value == number and Count(count) == count and hash(count) == hash(Count(number))
+    assert count.value == number and str(count) == str(number) and repr(count) == f"Count({number!r})"
+    assert Count.from_str(str(number)) == count and Count(count) == count and hash(count) == hash(Count(number))
 
 
 @given(st.text())
 def test_is_valid_agrees_with_construction(text: str) -> None:
     normalized = text.strip().upper()
     assert Code.is_valid(text) is (normalized.isascii() and normalized.isalpha())
+
+
+@pytest.mark.parametrize(
+    ("cls", "text", "expected"),
+    [
+        (Count, "12", Count(12)),
+        (Count, " -7 ", Count(-7)),  # whatever _parse_str accepts
+        (Small, "3", Small(3)),
+        (Ratio, "0.25", Ratio(0.25)),
+        (Day, "2024-02-29", Day(datetime.date(2024, 2, 29))),
+        (Code, " ab ", Code("AB")),  # no _parse_str: the constructor takes the text
+        (Hex, "ff", Hex(255)),
+    ],
+)
+def test_from_str(cls: type[Scalar[Any]], text: str, expected: Scalar[Any]) -> None:
+    built = cls.from_str(text)
+    assert built == expected and type(built) is cls
+
+
+@pytest.mark.parametrize(
+    ("cls", "text", "error", "message"),
+    [
+        (Count, "x", InvalidFormatError, "Count: cannot parse 'x'"),
+        (Count, "", InvalidFormatError, "Count: cannot parse ''"),
+        (Day, "2024-02-30", InvalidFormatError, "Day: cannot parse '2024-02-30'"),
+        (Small, "12", OutOfRangeError, "Small: value must be <= 9, got 12"),  # parsed, then validated
+        (Code, "a1", InvalidFormatError, "Code: expected letters, got 'A1'"),
+    ],
+)
+def test_from_str_errors(cls: type[Scalar[Any]], text: str, error: type[ValueObjectError], message: str) -> None:
+    with pytest.raises(error) as info:
+        cls.from_str(text)
+    assert type(info.value) is error and str(info.value) == message and info.value.vo is cls
+
+
+@pytest.mark.parametrize("text", [12, None, b"12", ["12"]])
+def test_from_str_takes_only_text(text: Any) -> None:
+    with pytest.raises(InvalidTypeError, match=f"^Count: from_str expects str, got {type(text).__name__}$") as info:
+        Count.from_str(text)
+    assert info.value.value is text
+
+
+def test_from_str_of_a_scalar_that_takes_no_text() -> None:
+    class Plain(Scalar[float]):
+        accepts = (float,)
+
+    with pytest.raises(InvalidTypeError, match=r"^Plain: expected float, got str$"):
+        Plain.from_str("1.5")
+
+
+@pytest.mark.parametrize(
+    ("built", "text", "shown"),
+    [
+        (Count(5), "5", "Count(5)"),
+        (Ratio(2), "2.0", "Ratio(2.0)"),
+        (Code(" ab "), "AB", "Code('AB')"),  # str is accepted: repr shows the text
+        (Hex(255), "ff", "Hex('ff')"),  # ... as str() writes it
+        (Day(datetime.date(2024, 2, 29)), "2024-02-29", "Day(datetime.date(2024, 2, 29))"),
+    ],
+)
+def test_str_and_repr(built: Scalar[Any], text: str, shown: str) -> None:
+    assert (str(built), repr(built), f"{built}", format(built, "")) == (text, shown, text, text)
+
+
+@pytest.mark.parametrize(
+    ("built", "spec", "text"),
+    [
+        (Count(5), "03d", "005"),
+        (Count(1234567), ",", "1,234,567"),
+        (Ratio(0.5), ".2%", "50.00%"),
+        (Code("ab"), ">4", "  AB"),
+        (Hex(255), "d", "255"),  # a spec formats the value, not str()
+        (Hex(255), "#x", "0xff"),
+        (Day(datetime.date(2024, 2, 29)), "%d/%m", "29/02"),
+    ],
+)
+def test_format_spec_formats_the_value(built: Scalar[Any], spec: str, text: str) -> None:
+    assert format(built, spec) == text and f"{built:{spec}}" == text
 
 
 @pytest.mark.parametrize(

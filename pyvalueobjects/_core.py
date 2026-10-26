@@ -230,6 +230,7 @@ class Scalar(ValueObject, Generic[T], abstract=True):
     _value: T
 
     accepts: ClassVar[tuple[type, ...]] = ()
+    _parse_str: ClassVar[staticmethod[[str], Any] | None] = None  # how from_str parses; None: the constructor takes str
 
     def __init__(self, value: object) -> None:
         cls = type(self)
@@ -278,3 +279,20 @@ class Scalar(ValueObject, Generic[T], abstract=True):
             raise
         except (ValueError, ArithmeticError) as exc:
             raise InvalidFormatError(f"cannot parse {show(raw)}", vo=cls, value=raw) from exc
+
+    @classmethod
+    def from_str(cls, text: str) -> Self:
+        """Build from text; ``cls.from_str(str(x)) == x`` for every scalar except ArrayList."""
+        if type(text) is not str:
+            raise InvalidTypeError(f"from_str expects str, got {type(text).__name__}", vo=cls, value=text)
+        return cls(text if cls._parse_str is None else cls._guard(cls._parse_str, text))
+
+    def __str__(self) -> str:
+        return str(self._value)
+
+    def __format__(self, spec: str) -> str:
+        return format(self._value, spec) if spec else str(self)
+
+    def __repr__(self) -> str:
+        shown = str(self) if str in self.accepts else self._value
+        return f"{type(self).__name__}({shown!r})"
