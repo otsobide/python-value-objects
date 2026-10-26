@@ -696,6 +696,13 @@ def test_component_rebuilds_a_subclass_instance_as_the_kind() -> None:
     assert parcel == Parcel(Label("u"), Point(1, 2)) and parcel == Parcel(OrderId("u"), Point(1, 2))
 
 
+def test_component_rebuilds_a_subclass_with_extra_fields_from_the_kind_fields() -> None:
+    """Review of #40: the rebuild passed every field of the subclass, so Point(1, 2, 3) raised a bare TypeError."""
+    parcel = Parcel(Label("a"), Point3(1, 2, 3))
+    assert type(parcel.origin) is Point and parcel.origin == Point(1, 2)
+    assert parcel == Parcel(Label("a"), Point(1, 2)) and Parcel.is_valid(Label("a"), Point3(1, 2, 3))
+
+
 @pytest.mark.parametrize(
     ("label", "origin", "message"),
     [

@@ -154,14 +154,15 @@ class ValueObject(metaclass=ValueObjectMeta):
     def _component(cls, name: str, kind: type[V], raw: object) -> V:
         """Coerce one constructor argument to exactly ``kind``; errors are re-raised in the name of ``cls``.
 
-        A subclass instance (a ``Price`` given for a ``Money`` field) is rebuilt as ``kind``, so stored
-        parts are canonical. Scalars convert raw input; composites must be given an instance.
+        A subclass instance (a ``Price`` given for a ``Money`` field) is rebuilt as ``kind`` from the
+        fields ``kind`` declares, so stored parts are canonical and fields the subclass adds are left out.
+        Scalars convert raw input; composites must be given an instance.
         """
         if type(raw) is kind:
             return raw
         try:
             if isinstance(raw, kind):
-                return kind(*raw._astuple())
+                return kind(*(getattr(raw, name) for name in kind._fields))
             if issubclass(kind, Scalar):
                 return kind(raw)
         except ValueObjectError as exc:
