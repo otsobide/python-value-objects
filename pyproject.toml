@@ -63,3 +63,13 @@ filterwarnings = [
     "ignore:invalid escape sequence:DeprecationWarning",
     "ignore:.*invalid escape sequence:SyntaxWarning",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["pyvalueobjects"]
+
+[tool.coverage.report]
+fail_under = 0  # transitional: 0.x code has no gate; 100 from the first 1.0 core commit on
+show_missing = true
+skip_covered = true
+exclude_also = ["@overload", "if TYPE_CHECKING:"]

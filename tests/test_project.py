@@ -9,8 +9,10 @@ import importlib.metadata
 import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
+import sysconfig
 import tomllib
 import warnings
 from pathlib import Path
@@ -243,19 +245,19 @@ def test_environment_runs_the_locked_tool_versions(lock: dict[str, Any], name: s
     assert importlib.metadata.version(name) in versions, f"{name} differs from uv.lock: run `uv sync`"
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        ".venv/",
-        "build/",
-        "dist/",
-        "pyvalueobjects.egg-info/",
-        ".pytest_cache/",
-        ".coverage",
-        "htmlcov/",
-        ".hypothesis/",
-    ],
-)
+# Paths that builds, test runs and tools create; `make clean` removes all of them except the environment.
+GENERATED_PATHS = [
+    "build/",
+    "dist/",
+    "pyvalueobjects.egg-info/",
+    ".pytest_cache/",
+    ".coverage",
+    "htmlcov/",
+    ".hypothesis/",
+]
+
+
+@pytest.mark.parametrize("path", [".venv/", *GENERATED_PATHS])
 def test_generated_paths_are_ignored_by_git(path: str) -> None:
     """Directories carry a trailing slash, so git matches them as directories even when they do not exist."""
     check = subprocess.run(["git", "check-ignore", "--quiet", "--no-index", path], cwd=ROOT, check=False)
@@ -271,18 +273,28 @@ TEST_MODULES = sorted(
 )
 
 
+COLLECT = """
+import decimal, fractions, sys  # loaded first, as by any library module that uses Decimal or Fraction
+import pytest
+code = pytest.main(["--collect-only", "-q", "-p", "no:cacheprovider"])
+import numbers
+print("stdlib numbers:", numbers.__file__, fractions.Fraction(1, 3) + 1)
+sys.exit(code)
+"""
+
+
 @pytest.fixture(scope="module")
-def collected() -> set[str]:
-    """Test files that a fresh `pytest --collect-only` run collects items from."""
-    run = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def collection() -> list[str]:
+    """Output lines of a fresh `pytest --collect-only` run in a process that imported the stdlib numbers first."""
+    run = subprocess.run([sys.executable, "-c", COLLECT], cwd=ROOT, capture_output=True, text=True, check=False)
     assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
-    return {line.split("::")[0] for line in run.stdout.splitlines() if "::" in line}
+    return run.stdout.splitlines()
+
+
+@pytest.fixture(scope="module")
+def collected(collection: list[str]) -> set[str]:
+    """Test files that the collection run collected items from."""
+    return {line.split("::")[0] for line in collection if "::" in line}
 
 
 @pytest.mark.parametrize("path", TEST_MODULES)
@@ -345,3 +357,106 @@ def test_other_compile_time_warnings_still_fail() -> None:
 def test_pytest_runs_strict(pytestconfig: pytest.Config, option: str) -> None:
     assert option in pytestconfig.getini("addopts")
     assert pytestconfig.getini("xfail_strict") is True
+
+
+# ------------------------------------------------------------------------------------------- Makefile
+
+MAKEFILE = (ROOT / "Makefile").read_text(encoding="utf-8")
+MAKE_TARGETS = sorted(m[1] for m in re.finditer(r"^([A-Za-z0-9_-]+)\s*:(?!=)", MAKEFILE, re.MULTILINE))
+PHONY = {name for m in re.finditer(r"^\.PHONY\s*:(?!=)(.*)$", MAKEFILE, re.MULTILINE) for name in m[1].split()}
+
+
+def make(*args: str, cwd: Path = ROOT) -> list[str]:
+    """The commands `make` would run for `args`, printed with -n instead of being run."""
+    if shutil.which("make") is None:
+        pytest.skip("make is not installed")
+    run = subprocess.run(["make", "-n", *args], cwd=cwd, capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr
+    return [line for line in run.stdout.splitlines() if not line.startswith("make")]  # drops "Nothing to be done"
+
+
+def test_regression_C50_phony_is_a_rule_not_a_variable() -> None:
+    """C50 (#32): `.PHONY = test` assigned a variable, so a file named `test` turned `make test` into a no-op."""
+    assert not re.search(r"^\.PHONY\s*[:?+!]?=", MAKEFILE, re.MULTILINE)
+    assert PHONY
+
+
+@pytest.mark.parametrize("target", MAKE_TARGETS)
+def test_regression_C50_every_target_is_phony(target: str) -> None:
+    assert target in PHONY
+
+
+def test_phony_lists_only_real_targets() -> None:
+    assert PHONY.issubset(MAKE_TARGETS), PHONY.difference(MAKE_TARGETS)
+
+
+@pytest.mark.parametrize("target", MAKE_TARGETS)
+def test_regression_C50_a_file_named_like_a_target_does_not_skip_it(tmp_path: Path, target: str) -> None:
+    clean, shadowed = tmp_path / "clean", tmp_path / "shadowed"
+    for directory in (clean, shadowed):
+        directory.mkdir()
+        shutil.copy(ROOT / "Makefile", directory)
+    (shadowed / target).touch()
+    assert make(target, cwd=clean), f"`make {target}` runs nothing"
+    assert make(target, cwd=shadowed) == make(target, cwd=clean)
+
+
+def test_default_goal_is_the_full_check() -> None:
+    assert make() == make("check")
+
+
+@pytest.mark.parametrize("target", sorted(set(MAKE_TARGETS) - {"clean"}))
+def test_make_targets_run_tools_through_uv(target: str) -> None:
+    """uv runs every tool from the environment that uv.lock pins."""
+    assert all(re.search(r"(?:^|&& )uv ", command) for command in make(target)), make(target)
+
+
+def test_make_cov_measures_branch_coverage_of_the_package() -> None:
+    assert make("cov") == ["uv run pytest --cov --cov-report=term-missing"]
+    run = PYPROJECT["tool"]["coverage"]["run"]
+    assert run["branch"] is True
+    assert run["source"] == ["pyvalueobjects"]
+
+
+def test_make_clean_removes_generated_paths_and_keeps_the_rest(tmp_path: Path) -> None:
+    if shutil.which("make") is None:
+        pytest.skip("make is not installed")
+    shutil.copy(ROOT / "Makefile", tmp_path)
+    for path in GENERATED_PATHS:
+        if path.endswith("/"):
+            (tmp_path / path / "nested").mkdir(parents=True)
+        else:
+            (tmp_path / path).touch()
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / "keep.py").touch()
+    subprocess.run(["make", "clean"], cwd=tmp_path, capture_output=True, check=True)
+    assert sorted(path.name for path in tmp_path.iterdir()) == [".venv", "Makefile", "keep.py"]
+
+
+def test_regression_C43_make_test_lets_pytest_name_the_modules() -> None:
+    """C43 (#32): `unittest discover -s ./tests` without `-t` put tests/ on sys.path, so tests/numbers became `numbers`."""
+    assert make("test") == ["uv run pytest"]
+
+
+@pytest.mark.parametrize("directory", sorted({str(Path(path).parent) for path in TEST_MODULES}))
+def test_regression_C43_every_test_directory_is_a_package(directory: str) -> None:
+    """pytest imports tests/numbers/int_test.py as tests.numbers.int_test only while each directory has __init__.py."""
+    for package in [Path(directory), *Path(directory).parents][:-1]:
+        assert (ROOT / package / "__init__.py").is_file(), f"{package} is not a package"
+
+
+def test_regression_C43_test_modules_are_imported_under_the_tests_package(request: pytest.FixtureRequest) -> None:
+    names = {item.module.__name__ for item in request.session.items if isinstance(item, pytest.Function)}
+    assert names
+    assert sorted(name for name in names if not name.startswith("tests.")) == []
+
+
+def test_regression_C43_collection_keeps_the_stdlib_numbers_module(collection: list[str]) -> None:
+    """With `decimal` imported first, 0.28.1 discovery failed with "'numbers' is not a package"."""
+    [report] = [line for line in collection if line.startswith("stdlib numbers:")]
+    _, path, fraction = report.rsplit(" ", 2)
+    assert Path(path).parent == Path(sysconfig.get_path("stdlib"))
+    assert fraction == "4/3"
+    import numbers
+
+    assert Path(numbers.__file__).parent == Path(sysconfig.get_path("stdlib"))

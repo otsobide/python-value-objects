@@ -1,12 +1,16 @@
-# Build project
-.PHONY = build
-build: deps
+.DEFAULT_GOAL := check
+.PHONY: install test cov check build clean publish
 
-# Install dependencies
-.PHONY = deps
-deps:
-
-# Run tests
-.PHONY = test
+install:          ## create .venv with the dev group
+	uv sync
 test:
-	python -m unittest discover -s ./tests -p '*_test.py'
+	uv run pytest
+cov:              ## branch coverage of pyvalueobjects/
+	uv run pytest --cov --cov-report=term-missing
+check: cov
+build:
+	rm -rf dist && uv build
+clean:
+	rm -rf dist build *.egg-info .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov .hypothesis
+publish: build
+	uv publish
