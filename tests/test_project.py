@@ -946,7 +946,16 @@ def test_regression_C55_default_pytest_discovery_finds_every_test_module(tmp_pat
     assert collect("-c", str(ini), "--rootdir", str(ROOT), "tests")["files"] == TEST_MODULES
 
 
-@pytest.mark.parametrize("pattern", PYTEST_INI.get("python_files", ["test_*.py"]))
+PYTEST_DEFAULT_FILES = ["test_*.py", "*_test.py"]  # pytest's built-in `python_files`
+
+
+def test_regression_pyproject_does_not_restate_the_default_test_file_patterns(pytestconfig: pytest.Config) -> None:
+    """The "transitional" `python_files = ["test_*.py", "*_test.py"]` was pytest's own default (#39 review)."""
+    assert "python_files" not in PYTEST_INI
+    assert pytestconfig.getini("python_files") == PYTEST_DEFAULT_FILES
+
+
+@pytest.mark.parametrize("pattern", PYTEST_INI.get("python_files", PYTEST_DEFAULT_FILES))
 def test_agents_md_documents_each_test_file_pattern(pattern: str) -> None:
     assert f"`{pattern}`" in AGENTS
 

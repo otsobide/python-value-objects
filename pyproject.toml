@@ -54,7 +54,6 @@ pyvalueobjects = ["py.typed"]
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]  # transitional: the 0.x unittest modules are named *_test.py
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = [
