@@ -15,6 +15,7 @@ import sys
 import sysconfig
 import tomllib
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -251,11 +252,64 @@ GENERATED_PATHS = [
 ]
 
 
+# Paths that must stay tracked.
+SOURCE_PATHS = [".github/", "pyvalueobjects/", "tests/", "AGENTS.md", "Makefile", "pyproject.toml", "uv.lock"]
+
+
+def export(destination: Path) -> Path:
+    """A copy of the checkout without .git, the environment or generated files, like a `git archive` export."""
+    generated = [path.rstrip("/") for path in GENERATED_PATHS]
+    shutil.copytree(ROOT, destination, ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__", *generated))
+    return destination
+
+
+@pytest.fixture(scope="module")
+def git_ignores(tmp_path_factory: pytest.TempPathFactory) -> Callable[[str], bool]:
+    """Whether .gitignore ignores a path, asked of a scratch repository that holds only a copy of it.
+
+    Asking git in ROOT needs ROOT to be a git work tree, and the user's global excludes took part.
+    """
+    git = require("git")
+    scratch = tmp_path_factory.mktemp("gitignore")
+    shutil.copy(ROOT / ".gitignore", scratch)
+    subprocess.run([git, "init", "--quiet"], cwd=scratch, capture_output=True, check=True)
+    no_global_excludes = f"core.excludesFile={scratch / 'no-global-excludes'}"
+
+    def ignores(path: str) -> bool:
+        """Directories carry a trailing slash, so git matches them as directories even when they do not exist."""
+        args = [git, "-c", no_global_excludes, "check-ignore", "--quiet", "--no-index", path]
+        check = subprocess.run(args, cwd=scratch, capture_output=True, text=True, check=False)
+        assert check.returncode in (0, 1), check.stderr  # 0 ignored, 1 not ignored; 128 is an error, not an answer
+        return check.returncode == 0
+
+    return ignores
+
+
 @pytest.mark.parametrize("path", [".venv/", *GENERATED_PATHS])
-def test_generated_paths_are_ignored_by_git(path: str) -> None:
-    """Directories carry a trailing slash, so git matches them as directories even when they do not exist."""
-    check = subprocess.run(["git", "check-ignore", "--quiet", "--no-index", path], cwd=ROOT, check=False)
-    assert check.returncode == 0, f"{path} is not in .gitignore"
+def test_generated_paths_are_ignored_by_git(git_ignores: Callable[[str], bool], path: str) -> None:
+    assert git_ignores(path), f"{path} is not in .gitignore"
+
+
+@pytest.mark.parametrize("path", SOURCE_PATHS)
+def test_source_paths_are_not_ignored_by_git(git_ignores: Callable[[str], bool], path: str) -> None:
+    assert not git_ignores(path), f".gitignore ignores {path}"
+
+
+def test_regression_gitignore_checks_pass_in_an_export_without_git(tmp_path: Path) -> None:
+    """In a `git archive` export or a release tarball, git exited 128 in ROOT and every check failed (#39 review)."""
+    require("git")
+    tree = export(tmp_path / "export")
+    selection = "generated_paths_are_ignored_by_git or source_paths_are_not_ignored_by_git"
+    pytest_args = ["-q", "-p", "no:cacheprovider", "--basetemp", str(tmp_path / "basetemp"), "-k", selection]
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", *pytest_args, "tests/test_project.py"],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    assert re.search(rf"^{1 + len(GENERATED_PATHS) + len(SOURCE_PATHS)} passed\b", run.stdout, re.MULTILINE), run.stdout
 
 
 # ------------------------------------------------------------------------------------------- test configuration
