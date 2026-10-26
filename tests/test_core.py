@@ -1308,8 +1308,9 @@ class Whole(Scalar[int]):
         ("+7", 7),
         ("007", 7),
         ("-0", 0),
-        (" 12 ", 12),  # surrounding whitespace is stripped
+        (" 12 ", 12),  # surrounding ASCII whitespace is stripped
         ("\t12\n", 12),
+        ("\r\n\v\f12\f\v\r\n", 12),
         ("9007199254740993", 9007199254740993),  # exact: never goes through float
         (str(2**200), 2**200),
     ],
@@ -1318,14 +1319,24 @@ def test_literal_accepts_the_grammar(text: str, value: int) -> None:
     assert INTEGER(text) == value and type(INTEGER(text)) is int
 
 
+ASCII_WHITESPACE = " \t\n\r\f\v"
+# Unicode whitespace that str.strip() would remove; regression (review of #40): they were stripped around a literal.
+UNICODE_SPACES = ["\u00a0", "\u3000", "\u2028", "\u0085", "\x1c", "\x1f"]
+
+
 @pytest.mark.parametrize(
     "text",
-    ["", " ", "1_000", "١٢", "１２", "0x10", "1.0", "1e3", "nan", "1 2", "12\n3", "--1", "+", "²"],
+    [
+        *["", " ", "1_000", "١٢", "１２", "0x10", "1.0", "1e3", "nan", "1 2", "12\n3", "--1", "+", "²"],
+        *[f"{space}42" for space in UNICODE_SPACES],
+        *[f"42{space}" for space in UNICODE_SPACES],
+        " \u00a042\u00a0 ",
+    ],
 )
 def test_literal_rejects_text_outside_the_grammar(text: str) -> None:
     with pytest.raises(ValueError, match=r"^not a valid literal: ") as info:
         INTEGER(text)
-    assert str(info.value) == f"not a valid literal: {text.strip()!r}"
+    assert str(info.value) == f"not a valid literal: {text.strip(ASCII_WHITESPACE)!r}"
 
 
 def test_literal_does_not_convert_rejected_text() -> None:

@@ -408,16 +408,19 @@ class Sized(Scalar[T], abstract=True):
 # ----------------------------------------------------------------------------------------------- helpers
 
 
+_ASCII_WHITESPACE = " \t\n\r\f\v"
+
+
 def literal(regex: re.Pattern[str], convert: Callable[[str], R]) -> Callable[[str], R]:
-    """Parser for an ASCII literal: strip, ``fullmatch`` the regex (else ValueError), then ``convert``.
+    """Parser for an ASCII literal: strip ASCII whitespace, ``fullmatch`` the regex (else ValueError), then ``convert``.
 
     Used for every non-string text format (int, decimal, ISO dates and times), so what is accepted
     never depends on how int()/float()/Decimal()/fromisoformat() behave in a given Python version:
-    '1_000', '١٢', 'nan', '0x10', '20240131' and 'T24:00' are all rejected.
+    '1_000', '١٢', 'nan', '0x10', '20240131', 'T24:00' and a no-break space around a number are all rejected.
     """
 
     def parse(text: str) -> R:
-        text = text.strip()
+        text = text.strip(_ASCII_WHITESPACE)
         if regex.fullmatch(text) is None:
             raise ValueError(f"not a valid literal: {text!r}")
         return convert(text)
