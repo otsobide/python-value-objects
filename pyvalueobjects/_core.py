@@ -118,13 +118,15 @@ class ValueObject(metaclass=ValueObjectMeta):
         """Coerce one constructor argument to exactly ``kind``; errors are re-raised in the name of ``cls``.
 
         A subclass instance (a ``Price`` given for a ``Money`` field) is rebuilt as ``kind``, so stored
-        parts are canonical. Composites must be given an instance.
+        parts are canonical. Scalars convert raw input; composites must be given an instance.
         """
         if type(raw) is kind:
             return raw
         try:
             if isinstance(raw, kind):
                 return kind(*raw._astuple())
+            if issubclass(kind, Scalar):
+                return kind(raw)
         except ValueObjectError as exc:
             raise type(exc)(f"{name}: {exc.reason}", vo=cls, value=exc.value) from exc
         raise InvalidTypeError(f"{name} must be {kind.__name__}, got {type(raw).__name__}", vo=cls, value=raw)
@@ -219,7 +221,7 @@ _PLAIN = (int, float, str)  # subclasses of these (IntEnum, StrEnum members) are
 class Scalar(ValueObject, Generic[T], abstract=True):
     """A value object wrapping exactly one value, exposed as the read-only ``.value``.
 
-    Pipeline: ``_parse`` (type gate against ``accepts``, then ``_convert``)
+    Pipeline: unwrap another Scalar -> ``_parse`` (type gate against ``accepts``, then ``_convert``)
     -> ``_validate`` (cooperative chain of checks and normalizations, each returning the value).
     """
 
@@ -235,6 +237,8 @@ class Scalar(ValueObject, Generic[T], abstract=True):
             raise TypeError(f"{cls.__name__} is abstract: subclass it")
         if hasattr(self, "_value"):
             raise FrozenInstanceError(f"cannot initialize '_value' again: {cls.__name__} is immutable")
+        if isinstance(value, Scalar):
+            value = value._value
         object.__setattr__(self, "_value", cls._validate(cls._parse(value)))
 
     @property

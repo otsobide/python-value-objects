@@ -773,6 +773,16 @@ class Heavy(float):
     pass
 
 
+class Tagged(ValueObject):
+    __slots__ = ("code", "count")
+    code: Code
+    count: Count
+
+    def __init__(self, code: Any, count: Any) -> None:
+        cls = type(self)
+        self._set(code=cls._component("code", Code, code), count=cls._component("count", Count, count))
+
+
 SCALARS = [Count(0), Count(-7), Count(2**100), Small(3), Ratio(0.5), Ratio(2), Code(" ab "), ShortCode("x")]
 SCALARS += [Hex(255), Hex("10"), Day(datetime.date(2024, 2, 29))]
 
@@ -862,6 +872,38 @@ def test_instances_of_int_float_str_subclasses_become_the_plain_type(
 
 
 @pytest.mark.parametrize(
+    ("cls", "raw", "expected"),
+    [
+        (Count, Count(3), Count(3)),
+        (Count, Small(3), Count(3)),
+        (Small, Count(3), Small(3)),
+        (Ratio, Count(2), Ratio(2.0)),
+        (Count, Hex("ff"), Count(255)),
+        (Code, ShortCode("ab"), Code("AB")),
+    ],
+)
+def test_another_scalar_is_unwrapped(cls: type[Scalar[Any]], raw: Scalar[Any], expected: Scalar[Any]) -> None:
+    built = cls(raw)
+    assert built == expected and type(built) is cls
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "error", "message"),
+    [
+        (Small, Count(12), OutOfRangeError, "Small: value must be <= 9, got 12"),
+        (Count, Ratio(1.5), InvalidTypeError, "Count: expected int, got float"),
+        (ShortCode, Code("abcd"), OutOfRangeError, "ShortCode: length must be <= 3, got 4"),
+    ],
+)
+def test_an_unwrapped_value_obeys_the_target_rules(
+    cls: type[Scalar[Any]], raw: Scalar[Any], error: type[ValueObjectError], message: str
+) -> None:
+    with pytest.raises(error) as info:
+        cls(raw)
+    assert str(info.value) == message and info.value.vo is cls
+
+
+@pytest.mark.parametrize(
     ("cls", "raw", "cause"),
     [(Hex, "zz", ValueError), (Hex, "", ValueError), (Reciprocal, 0, ZeroDivisionError)],
 )
@@ -931,9 +973,9 @@ def test_regression_C03_scalar_init_cannot_run_again_on_a_live_object() -> None:
 
 
 def test_idempotence_law(scalar: Scalar[Any]) -> None:
-    """Every scalar accepts its own stored type, so rebuilding from .value gives an equal object."""
+    """Every scalar accepts its own stored type, so rebuilding from .value or from itself gives an equal object."""
     cls = type(scalar)
-    assert cls(scalar.value) == scalar and cls(*scalar._astuple()) == scalar
+    assert cls(scalar.value) == scalar and cls(scalar) == scalar and cls(*scalar._astuple()) == scalar
 
 
 def test_scalar_round_trips(scalar: Scalar[Any]) -> None:
@@ -956,10 +998,44 @@ def test_scalars_equal_only_within_one_type() -> None:
 @given(st.integers())
 def test_int_scalar_properties(number: int) -> None:
     count = Count(number)
-    assert count.value == number and count == Count(number) and hash(count) == hash(Count(number))
+    assert count.value == number and Count(count) == count and hash(count) == hash(Count(number))
 
 
 @given(st.text())
 def test_is_valid_agrees_with_construction(text: str) -> None:
     normalized = text.strip().upper()
     assert Code.is_valid(text) is (normalized.isascii() and normalized.isalpha())
+
+
+@pytest.mark.parametrize(
+    ("code", "count", "expected"),
+    [
+        (" ab ", 2, Tagged(Code("AB"), Count(2))),
+        (Code("ab"), Count(2), Tagged(Code("AB"), Count(2))),
+        (ShortCode("ab"), Small(2), Tagged(Code("AB"), Count(2))),  # rebuilt as the field type
+        ("ab", Hex("ff"), Tagged(Code("AB"), Count(255))),  # another scalar converts by unwrapping
+        (Shade.RED, Status.ACTIVE, Tagged(Code("RED"), Count(1))),
+    ],
+)
+def test_component_converts_scalar_fields(code: Any, count: Any, expected: Tagged) -> None:
+    tagged = Tagged(code, count)
+    assert tagged == expected and type(tagged.code) is Code and type(tagged.count) is Count
+
+
+@pytest.mark.parametrize(
+    ("code", "count", "error", "reason", "value"),
+    [
+        (" 1 ", 2, InvalidFormatError, "code: expected letters, got '1'", "1"),
+        (None, 2, InvalidTypeError, "code: expected str, got NoneType", None),
+        ("ab", "2", InvalidTypeError, "count: expected int, got str", "2"),
+        ("ab", Ratio(1.5), InvalidTypeError, "count: expected int, got float", 1.5),
+    ],
+)
+def test_component_relabels_scalar_errors(
+    code: Any, count: Any, error: type[ValueObjectError], reason: str, value: object
+) -> None:
+    with pytest.raises(error) as info:
+        Tagged(code, count)
+    err = info.value
+    assert type(err) is error and str(err) == f"Tagged: {reason}" and (err.vo, err.value) == (Tagged, value)
+    assert type(err.__cause__) is error and err.__cause__.vo in (Code, Count)
