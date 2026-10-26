@@ -413,14 +413,30 @@ def test_warnings_are_errors(category: type[Warning]) -> None:
     ("category", "message"),
     [
         (DeprecationWarning, "invalid escape sequence '\\d'"),  # Python 3.11
-        (SyntaxWarning, "invalid escape sequence '\\d'"),  # Python 3.12 to 3.14
-        (SyntaxWarning, '"\\d" is an invalid escape sequence. Did you mean "\\\\d"?'),  # Python 3.15
+        (SyntaxWarning, "invalid escape sequence '\\d'"),  # Python 3.12 and 3.13
+        (  # Python 3.14 and later
+            SyntaxWarning,
+            '"\\d" is an invalid escape sequence. Such sequences will not work in the future. '
+            'Did you mean "\\\\d"? A raw string is also an option.',
+        ),
     ],
 )
 def test_transitional_filter_silences_invalid_escape_sequences(category: type[Warning], message: str) -> None:
     """The legacy cpe.py regex is not a raw string; the filter goes away when cpe.py is replaced."""
     with warnings.catch_warnings(record=True) as caught:  # keeps the configured filters, records what passes them
         warnings.warn(message, category, stacklevel=1)
+    assert caught == []
+
+
+def test_regression_transitional_filter_silences_the_warning_of_this_python() -> None:
+    """The filter was checked against a made-up message: the reworded one already comes from 3.14 (#39 review)."""
+    with warnings.catch_warnings(record=True) as emitted:
+        warnings.simplefilter("always")
+        compile("PATTERN = '[a-z\\d]+'", "legacy.py", "exec")
+    [warning] = emitted
+    assert "invalid escape sequence" in str(warning.message)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.warn(str(warning.message), warning.category, stacklevel=1)
     assert caught == []
 
 
