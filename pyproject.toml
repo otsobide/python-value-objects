@@ -33,6 +33,16 @@ Mirror = "https://github.com/otsobide/python-value-objects"           # the `ori
 Issues = "https://github.com/otsobide/python-value-objects/issues"    # where the 1.0 issues live
 Changelog = "https://codeberg.org/n1nj4t4nuk1/python-value-objects/src/branch/main/CHANGELOG.md"
 
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6",
+    "hypothesis>=6.100",
+    "mypy>=1.13",
+    "ruff>=0.8",
+    "tzdata>=2024.1; sys_platform == 'win32'",   # zoneinfo data for TimeZone tests on Windows (dev only)
+]
+
 # Transitional until the 0.x code is gone: the legacy subpackages have no __init__.py,
 # so they are found as namespace packages (the default for packages.find in pyproject.toml).
 [tool.setuptools.packages.find]

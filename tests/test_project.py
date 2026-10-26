@@ -6,10 +6,13 @@ checkout (`uv run pytest` does that).
 
 import fnmatch
 import importlib.metadata
+import importlib.util
 import json
 import re
+import subprocess
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -167,3 +170,91 @@ def test_regression_C45_every_package_directory_is_shipped(package: str) -> None
     assert not any(fnmatch.fnmatchcase(package, pattern) for pattern in find.get("exclude", []))
     is_regular = (ROOT.joinpath(*package.split(".")) / "__init__.py").is_file()
     assert is_regular or find.get("namespaces", True), f"{package} has no __init__.py and namespaces are disabled"
+
+
+# ------------------------------------------------------------------------------------------- development environment
+
+DEV_TOOLS = {"pytest": "pytest", "pytest-cov": "pytest_cov", "hypothesis": "hypothesis", "mypy": "mypy", "ruff": "ruff"}
+
+
+def requirement(text: str) -> tuple[str, str, str]:
+    """Split a PEP 508 requirement without extras into (name, specifier, marker)."""
+    match = re.fullmatch(r"([A-Za-z0-9._-]+)\s*([^;]*?)\s*(?:;\s*(.+?)\s*)?", text)
+    assert match, f"unsupported requirement {text!r}"
+    return match[1], match[2], match[3] or ""
+
+
+def release(version: str) -> tuple[int, ...]:
+    """The numeric release segment of a version, e.g. '6.100' -> (6, 100)."""
+    match = re.match(r"\d+(?:\.\d+)*", version)
+    assert match, f"unsupported version {version!r}"
+    return tuple(int(part) for part in match[0].split("."))
+
+
+DEV_GROUP = {name: (spec, marker) for name, spec, marker in map(requirement, PYPROJECT["dependency-groups"]["dev"])}
+
+
+@pytest.fixture(scope="module")
+def lock() -> dict[str, Any]:
+    path = ROOT / "uv.lock"
+    assert path.is_file(), "uv.lock is missing: run `uv lock` and commit the result"
+    return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def locked(lock: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    return [package for package in lock["package"] if package["name"] == name]
+
+
+@pytest.mark.parametrize(("name", "module"), DEV_TOOLS.items())
+def test_dev_group_installs_each_tool(name: str, module: str) -> None:
+    spec, marker = DEV_GROUP[name]
+    assert marker == "", f"{name} is needed on every platform"
+    assert importlib.util.find_spec(module) is not None, f"{name} is not installed: run `uv sync`"
+    floor = spec.removeprefix(">=")
+    assert release(importlib.metadata.version(name)) >= release(floor)
+
+
+def test_tzdata_is_only_needed_on_windows() -> None:
+    assert DEV_GROUP["tzdata"][1] == "sys_platform == 'win32'"
+
+
+def test_lockfile_records_the_current_dev_group(lock: dict[str, Any]) -> None:
+    """A lock resolved from another dev group makes `uv sync --locked` fail in CI."""
+    [project] = locked(lock, DISTRIBUTION)
+    recorded = project["metadata"]["requires-dev"]["dev"]
+    assert {(e["name"], e.get("specifier", ""), e.get("marker", "")) for e in recorded} == {
+        (name, spec, marker) for name, (spec, marker) in DEV_GROUP.items()
+    }
+
+
+def test_lockfile_matches_the_project(lock: dict[str, Any]) -> None:
+    [project] = locked(lock, DISTRIBUTION)
+    assert lock["requires-python"] == PROJECT["requires-python"]
+    assert project["version"] == PROJECT["version"]
+    assert project["source"] == {"editable": "."}
+    assert "dependencies" not in project, "the library itself must stay dependency-free"
+
+
+@pytest.mark.parametrize("name", DEV_TOOLS)
+def test_environment_runs_the_locked_tool_versions(lock: dict[str, Any], name: str) -> None:
+    versions = [package["version"] for package in locked(lock, name)]
+    assert importlib.metadata.version(name) in versions, f"{name} differs from uv.lock: run `uv sync`"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".venv/",
+        "build/",
+        "dist/",
+        "pyvalueobjects.egg-info/",
+        ".pytest_cache/",
+        ".coverage",
+        "htmlcov/",
+        ".hypothesis/",
+    ],
+)
+def test_generated_paths_are_ignored_by_git(path: str) -> None:
+    """Directories carry a trailing slash, so git matches them as directories even when they do not exist."""
+    check = subprocess.run(["git", "check-ignore", "--quiet", "--no-index", path], cwd=ROOT, check=False)
+    assert check.returncode == 0, f"{path} is not in .gitignore"
