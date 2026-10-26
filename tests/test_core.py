@@ -1735,6 +1735,15 @@ class Tally(Scalar[int]):
     __add__ = binary_op(operator.add)
 
 
+class Scaled(Scalar[int]):
+    """Scaled * int only: same_type=False refuses Scaled * Scaled, and the explicit operands replace
+    operand_types, so a float is refused too, although int * int and int * float would both compute."""
+
+    accepts = (int,)
+    operand_types = (int, float)
+    __mul__ = binary_op(operator.mul, operands=(int,), same_type=False)
+
+
 TRAPPING = decimal.Context(prec=34, traps=[decimal.InvalidOperation, decimal.DivisionByZero, decimal.Overflow])
 
 
@@ -1773,6 +1782,7 @@ DAY = datetime.timedelta(days=1)
         (lambda: Span(DAY) * 3, Span(3 * DAY)),
         (lambda: -Span(DAY), Span(-DAY)),
         (lambda: Tally(1) + Tally(2), Tally(3)),
+        (lambda: Scaled(2) * 3, Scaled(6)),
         (lambda: Amount(Decimal("1.5")) * 2, Amount(Decimal("3.0"))),
         (lambda: 2 * Amount(Decimal("1.5")), Amount(Decimal("3.0"))),
     ],
@@ -1797,27 +1807,41 @@ def test_results_are_validated_again(compute: Callable[[], Scalar[Any]], message
     assert str(info.value) == message and info.value.vo is PositiveUnits
 
 
+def type_name(obj: object) -> str:
+    """The type name an operator TypeError shows: C types outside builtins carry their module (decimal.Decimal)."""
+    kind = type(obj)
+    return kind.__name__ if kind.__module__ in ("builtins", __name__) else f"{kind.__module__}.{kind.__name__}"
+
+
 @pytest.mark.parametrize(
     ("left", "right", "symbol"),
     [
-        (Units(1), 1.5, "+"),  # a type outside operand_types
-        (Units(1), True, "+"),  # operand types are exact: bool is not int
-        (Units(1), "1", "+"),
-        (Units(1), Decimal(1), "+"),
-        (Units(1), PositiveUnits(1), "+"),  # parent, child and sibling VOs do not mix
-        (PositiveUnits(1), Units(1), "+"),
-        (Units(1), Tally(1), "+"),
-        (1.5, Units(1), "+"),
-        (Units(1), None, "-"),
-        (Span(DAY), Span(DAY), "*"),  # same_type=False
-        (Span(DAY), DAY, "*"),  # explicit operands replace operand_types
-        (Span(DAY), 2.5, "*"),
-        (Span(DAY), 1, "+"),
-        (Tally(1), 1, "+"),  # no operand_types: raw values are refused
+        pytest.param(Units(1), 1.5, "+", id="type-outside-operand-types"),
+        pytest.param(Units(1), True, "+", id="bool-is-not-int"),  # operand types are exact
+        pytest.param(Units(1), "1", "+", id="str"),
+        pytest.param(Units(1), Decimal(1), "+", id="decimal"),
+        pytest.param(Units(1), PositiveUnits(1), "+", id="child-vo"),  # parent, child and sibling VOs do not mix
+        pytest.param(PositiveUnits(1), Units(1), "+", id="parent-vo"),
+        pytest.param(Units(1), Tally(1), "+", id="sibling-vo"),
+        pytest.param(1.5, Units(1), "+", id="reflected-type-outside-operand-types"),
+        pytest.param(Units(1), None, "-", id="none"),
+        pytest.param(Span(DAY), Span(DAY), "*", id="same-type-false"),
+        pytest.param(Scaled(2), Scaled(3), "*", id="same-type-false-computable"),
+        pytest.param(Span(DAY), DAY, "*", id="operands-replace-operand-types"),
+        pytest.param(Scaled(2), 1.5, "*", id="operands-replace-operand-types-computable"),
+        pytest.param(Span(DAY), 2.5, "*", id="type-outside-operands"),
+        pytest.param(Span(DAY), 1, "+", id="type-outside-operand-types-of-another-operator"),
+        pytest.param(Tally(1), 1, "+", id="no-operand-types"),  # raw values are refused
     ],
 )
 def test_other_operands_are_a_type_error(left: object, right: object, symbol: str) -> None:
-    with pytest.raises(TypeError, match=re.escape(f"unsupported operand type(s) for {symbol}:")) as info:
+    """Only the NotImplemented path names the operands' own types: an operand that got through would fail on the
+    unwrapped value instead ('int' and 'str', 'timedelta' and 'timedelta') or build a result.
+
+    Regression (review of #40): matching the message prefix let accepted operands pass for the wrong reason.
+    """
+    message = f"unsupported operand type(s) for {symbol}: '{type_name(left)}' and '{type_name(right)}'"
+    with pytest.raises(TypeError, match=f"^{re.escape(message)}$") as info:
         eval(f"left {symbol} right", {"left": left, "right": right})
     assert not isinstance(info.value, ValueObjectError)
 
