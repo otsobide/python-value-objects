@@ -66,8 +66,8 @@ class TestValid:
 
     def test_immutable_without_dict(self, sample: Sample, raw: Any) -> None:
         a = sample.build(raw)
-        for name in [*a._fields, *a.__match_args__, "other"]:
-            with pytest.raises(AttributeError):
+        for name in [*a._fields, *a.__match_args__, "other"]:  # Python alone already refuses `value` and `other`
+            with pytest.raises(FrozenInstanceError):
                 setattr(a, name, None)
         with pytest.raises(FrozenInstanceError):
             delattr(a, a._fields[0])
