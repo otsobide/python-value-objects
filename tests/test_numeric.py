@@ -181,6 +181,142 @@ def test_regression_C16_a_float_is_a_type_error_for_int_whatever_its_value(raw: 
         Int(raw)
 
 
+# ------------------------------------------------------------------------------------------- Int: text
+
+INT_TEXTS = [
+    ("0", 0), ("-0", 0), ("+7", 7), ("007", 7), ("-42", -42), (" 42 ", 42), ("\t-3\n", -3),
+    ("9007199254740993", 2**53 + 1), ("-9007199254740993", -(2**53) - 1),
+    ("123456789012345678901234567890", 123456789012345678901234567890), (str(2**200), 2**200),
+]  # fmt: skip
+NOT_INT_TEXTS = [
+    "", " ", "+", "-", "--1", "+-1", "1-", "39.0", "39.5", "-39.1", "1.", ".5", "1e3", "1E3", "1e-400", "0x10", "0b1",
+    "0o7", "1_000", "1 000", "1,000", "١٢", "５", "𝟕", "²", "½", "\xa07", "7\u2003", "7\u2028", "nan", "inf", "seven",
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("text", "value"), INT_TEXTS)
+def test_from_str_reads_an_integer_literal_exactly(text: str, value: int) -> None:
+    number = Int.from_str(text)
+    assert number.value == value and type(number.value) is int
+
+
+@pytest.mark.parametrize("cls", members(Int))
+@pytest.mark.parametrize("text", NOT_INT_TEXTS)
+def test_from_str_rejects_everything_but_an_ascii_integer(cls: type[Int], text: str) -> None:
+    with pytest.raises(InvalidFormatError) as info:
+        cls.from_str(text)
+    assert str(info.value) == f"{cls.__name__}: cannot parse {show(text)}" and type(info.value.__cause__) is ValueError
+
+
+@pytest.mark.parametrize(
+    ("cls", "text", "message"),
+    [
+        (PositiveInt, "0", "PositiveInt: value must be > 0, got 0"),
+        (PositiveInt, "-5", "PositiveInt: value must be > 0, got -5"),
+        (PositiveOrZeroInt, "-1", "PositiveOrZeroInt: value must be >= 0, got -1"),
+        (NegativeInt, "5", "NegativeInt: value must be < 0, got 5"),
+        (NegativeOrZeroInt, " +1 ", "NegativeOrZeroInt: value must be <= 0, got 1"),
+    ],
+)
+def test_from_str_applies_the_bounds_of_the_class(cls: type[Int], text: str, message: str) -> None:
+    with pytest.raises(OutOfRangeError, match=f"^{message}$"):
+        cls.from_str(text)
+
+
+@pytest.mark.parametrize("raw", [0, 39.0, True, b"39", Decimal("39"), Signal.UP, None, ["1"]])
+def test_from_str_takes_only_text(raw: Any) -> None:
+    with pytest.raises(InvalidTypeError, match=f"^PositiveInt: from_str expects str, got {type(raw).__name__}$"):
+        PositiveInt.from_str(raw)
+
+
+def test_from_str_reads_a_str_enum_member_as_its_text() -> None:
+    assert PositiveInt.from_str(Digits.SEVEN) == PositiveInt(7)
+
+
+@given(
+    st.integers(-(10**60), 10**60), st.sampled_from(["", " ", "\t\n"]), st.booleans(), st.sampled_from(["", "0", "00"])
+)
+def test_from_str_round_trips_through_any_spelling(number: int, pad: str, plus: bool, zeros: str) -> None:
+    sign = "-" if number < 0 else "+" if plus else ""
+    assert Int.from_str(f"{pad}{sign}{zeros}{abs(number)}{pad}") == Int(number) == Int.from_str(str(Int(number)))
+
+
+# ------------------------------------------------------------------------------------------- Int: regressions (#34)
+
+
+def test_regression_C09_from_str_keeps_every_digit_of_a_big_integer() -> None:
+    """C09 (#34): 0.x parsed through float(), so '9007199254740993' became 9007199254740992."""
+    for text in ("9007199254740993", "-9007199254740993", "123456789012345678901234567890"):
+        assert Int.from_str(text).value == int(text)
+
+
+@pytest.mark.parametrize(
+    "text", ["0.99999999999999999", "1.0000000000000001", "39.00000000000000001", "1e-400", "-1e-400"]
+)
+def test_regression_C10_from_str_rejects_text_that_only_rounds_to_an_integer(text: str) -> None:
+    """C10 (#34): 0.x checked is_integer() on the parsed float, so these became 1, 1, 39, 0 and 0."""
+    with pytest.raises(InvalidFormatError, match=r"^Int: cannot parse "):
+        Int.from_str(text)
+
+
+def test_regression_C11_from_str_reads_integers_beyond_the_float_range() -> None:
+    """C11 (#34): float('1' * 400) is inf, so 0.x refused text that the constructor accepted as an int."""
+    assert Int.from_str("1" * 400) == Int(int("1" * 400))
+
+
+@pytest.mark.parametrize("raw", [True, False, b"39", 39, 39.0, Decimal("39"), Signal.UP])
+def test_regression_C12_from_str_rejects_what_is_not_text(raw: Any) -> None:
+    """C12 (#34): 0.x had no type check, so from_str(True) built Int(1) and bytes, floats and Decimals passed."""
+    with pytest.raises(InvalidTypeError, match=r"^Int: from_str expects str, got "):
+        Int.from_str(raw)
+
+
+@pytest.mark.parametrize(
+    ("parse", "error", "message"),
+    [
+        (lambda: PositiveInt.from_str("-5"), OutOfRangeError, "PositiveInt: value must be > 0, got -5"),
+        (lambda: NegativeInt.from_str("5"), OutOfRangeError, "NegativeInt: value must be < 0, got 5"),
+        (lambda: Int.from_str("39.5"), InvalidFormatError, "Int: cannot parse '39.5'"),
+    ],
+)
+def test_regression_C13_from_str_keeps_the_real_cause(parse: Callable[[], Int], error: type, message: str) -> None:
+    """C13 (#34): 0.x replaced every failure, bounds included, with 'Input type should be number format strings.'."""
+    with pytest.raises(error) as info:
+        parse()
+    assert type(info.value) is error and str(info.value) == message
+
+
+@pytest.mark.parametrize("cls", members(Int))
+@pytest.mark.parametrize("text", ["39.1", "-39.1", "0.5", "-0.5"])
+def test_regression_C14_C46_from_str_rejects_decimals_for_every_int_class(cls: type[Int], text: str) -> None:
+    """C14/C46 (#34): the 0.x '*from_str*_with_decimals' tests called from_float, so a truncating from_str passed.
+
+    A truncated value would be accepted by some class or fail on its bounds: only a parse error passes here.
+    """
+    with pytest.raises(InvalidFormatError) as info:
+        cls.from_str(text)
+    assert type(info.value) is InvalidFormatError
+
+
+def test_regression_C54_from_str_rejects_zero_text_for_positive_int_on_its_bound() -> None:
+    """C54 (#34): the 0.x zero test passed the int 0, so it never parsed '0'; the bound must be what rejects it."""
+    with pytest.raises(OutOfRangeError, match=r"^PositiveInt: value must be > 0, got 0$"):
+        PositiveInt.from_str("0")
+    with pytest.raises(InvalidTypeError):
+        PositiveInt.from_str(0)
+
+
+@pytest.mark.parametrize("text", ["1_000", "١٢", "５", "1e3", "\xa012", "12\u3000"])
+def test_regression_X02_from_str_reads_only_ascii_digits(text: str) -> None:
+    """X02 (#34): 0.x went through float(), which reads PEP 515 underscores, any Unicode digit and exponents.
+
+    Surrounding ASCII whitespace is stripped, as for every text format; any other whitespace is rejected.
+    """
+    with pytest.raises(InvalidFormatError):
+        Int.from_str(text)
+    assert Int.from_str(" 12\n") == Int(12)
+
+
 # ------------------------------------------------------------------------------------------- extension
 
 
@@ -227,7 +363,7 @@ def test_subclasses_declare_their_own_rules(cls: type[Int], raw: Any, error: typ
 @pytest.mark.parametrize(("cls", "raw"), [(Age, 0), (Age, 150), (Quantity, 1), (Even, -4), (EvenPercent, 100)])
 def test_subclasses_keep_the_int_behaviour(cls: type[Int], raw: int) -> None:
     number = cls(raw)
-    assert int(number) == raw and repr(number) == f"{cls.__name__}({raw})"
+    assert cls.from_str(f" {raw} ") == number and int(number) == raw and repr(number) == f"{cls.__name__}({raw})"
     assert number != Int(raw) and Int(number) == Int(raw)
 
 

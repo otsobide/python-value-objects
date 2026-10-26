@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
-from pyvalueobjects._core import Bounded, Scalar, T
+from pyvalueobjects._core import Bounded, Scalar, T, literal
 
 __all__ = [
     "Int",
@@ -14,6 +15,8 @@ __all__ = [
     "PositiveInt",
     "PositiveOrZeroInt",
 ]
+
+_INT_LITERAL = re.compile(r"[+-]?[0-9]+", re.ASCII)
 
 
 class Numeric(Bounded[T], abstract=True):
@@ -36,6 +39,7 @@ class Int(Numeric[int]):
     """Arbitrary-precision integer. ``bool`` is never an int; IntEnum members become plain ints."""
 
     accepts = (int,)
+    _parse_str = staticmethod(literal(_INT_LITERAL, int))  # exact for any size, unlike float()
 
     if TYPE_CHECKING:
 

@@ -44,9 +44,9 @@ NOT_INT = ["1", None, True, 1.0, Decimal(1), [1]]
 # Each family adds a Sample per value object in the commit that adds the value object (B3-B9).
 SAMPLES: list[Sample] = [
     # numbers
-    Sample(numeric.Int, [0, -7, 2**100], wrong_type=NOT_INT, normalized=[(Level.HIGH, "3")], str_roundtrip=False),
-    Sample(numeric.PositiveOrZeroInt, [0, 10**30], invalid=[-1], wrong_type=NOT_INT, str_roundtrip=False),
-    Sample(numeric.PositiveInt, [1, 10**30], invalid=[0, -1], wrong_type=NOT_INT, str_roundtrip=False),
-    Sample(numeric.NegativeOrZeroInt, [0, -5], invalid=[1], wrong_type=NOT_INT, str_roundtrip=False),
-    Sample(numeric.NegativeInt, [-1, -(10**30)], invalid=[0, 1], wrong_type=NOT_INT, str_roundtrip=False),
+    Sample(numeric.Int, [0, -7, 2**100], wrong_type=NOT_INT, normalized=[(Level.HIGH, "3")]),
+    Sample(numeric.PositiveOrZeroInt, [0, 10**30], invalid=[-1], wrong_type=NOT_INT),
+    Sample(numeric.PositiveInt, [1, 10**30], invalid=[0, -1], wrong_type=NOT_INT),
+    Sample(numeric.NegativeOrZeroInt, [0, -5], invalid=[1], wrong_type=NOT_INT),
+    Sample(numeric.NegativeInt, [-1, -(10**30)], invalid=[0, 1], wrong_type=NOT_INT),
 ]

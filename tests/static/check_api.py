@@ -72,6 +72,7 @@ Code("a").value = "b"  # type: ignore[misc]  # read-only: an unused ignore would
 
 # numbers
 assert_type(PositiveInt(1).value, int)
+assert_type(PositiveInt.from_str("1"), PositiveInt)
 assert_type(PositiveInt.from_optional(None), PositiveInt | None)
 assert_type(Int(PositiveInt(1)), Int)
 assert_type(int(Int(1)), int)
