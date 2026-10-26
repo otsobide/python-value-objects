@@ -1252,6 +1252,35 @@ def test_from_str_takes_only_text(text: Any) -> None:
     assert info.value.value is text
 
 
+class Digit(enum.StrEnum):
+    ONE = "1"
+
+
+class Echo(Scalar[str]):
+    """Stores the type and the text its parser was given."""
+
+    accepts = (str,)
+    _parse_str = staticmethod(lambda text: f"{type(text).__name__}:{text}")
+
+
+@pytest.mark.parametrize(
+    ("cls", "text", "expected"),
+    [
+        (Count, Digit.ONE, Count(1)),
+        (Code, Shade.RED, Code("RED")),  # no _parse_str: the constructor gets the plain text
+        (Code, Loud("ab"), Code("AB")),  # the str value, not the overridden __str__
+        (Echo, Shade.RED, Echo("str:red")),  # the parser gets a plain str
+        (Echo, Loud("ab"), Echo("str:ab")),
+    ],
+)
+def test_from_str_reads_a_str_subclass_as_its_plain_value(
+    cls: type[Scalar[Any]], text: str, expected: Scalar[Any]
+) -> None:
+    """Review of #40: from_str refused StrEnum members, which the constructor of a str scalar accepts."""
+    built = cls.from_str(text)
+    assert built == expected and type(built) is cls and type(built.value) is type(expected.value)
+
+
 def test_from_str_of_a_scalar_that_takes_no_text() -> None:
     class Plain(Scalar[float]):
         accepts = (float,)

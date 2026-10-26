@@ -350,9 +350,12 @@ class Scalar(ValueObject, Generic[T], abstract=True):
 
     @classmethod
     def from_str(cls, text: str) -> Self:
-        """Build from text; ``cls.from_str(str(x)) == x`` for every scalar except ArrayList."""
-        if type(text) is not str:
+        """Build from text; ``cls.from_str(str(x)) == x`` for every scalar except ArrayList.
+
+        A str subclass (a StrEnum member) is read as its plain str value, as the constructor reads it."""
+        if not isinstance(text, str):
             raise InvalidTypeError(f"from_str expects str, got {type(text).__name__}", vo=cls, value=text)
+        text = str.__str__(text)
         return cls(text if cls._parse_str is None else cls._guard(cls._parse_str, text))
 
     def __str__(self) -> str:
