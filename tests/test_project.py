@@ -707,9 +707,15 @@ def test_ruff_and_mypy_target_the_oldest_supported_python() -> None:
     assert MYPY["python_version"] == f"{major}.{minor}"
 
 
-def test_mypy_checks_the_package_strictly() -> None:
+def test_mypy_checks_the_package_and_the_typing_contract_strictly() -> None:
     assert MYPY["strict"] is True
-    assert "pyvalueobjects" in MYPY["files"]
+    assert MYPY["files"] == ["pyvalueobjects", "tests/static"]
+    assert (ROOT / "tests" / "static" / "check_api.py").is_file()
+
+
+def test_the_typing_contract_is_never_run_by_pytest(collection: dict[str, Any]) -> None:
+    """tests/static/check_api.py only exists for mypy: its module-level calls must not run as a test."""
+    assert not [path for path in collection["files"] if path.startswith("tests/static/")]
 
 
 @pytest.mark.parametrize("path", RUFF_LEGACY)
@@ -812,11 +818,16 @@ def test_mypy_checks_new_code_strictly_and_skips_legacy_code(tmp_path: Path) -> 
     files["pyvalueobjects/_core.py"] = (
         'def untyped(value):\n    return value\n\n\ndef wrong() -> int:\n    return "s"\n'
     )
+    files["tests/static/check_api.py"] = "from pyvalueobjects._core import wrong\n\nCHECKED: str = wrong()\n"
     write_tree(tmp_path, files)
     run = subprocess.run([sys.executable, "-m", "mypy"], cwd=tmp_path, capture_output=True, text=True, check=False)
     errors = re.findall(r"^(\S+?):\d+: error: .*\[([\w-]+)\]$", run.stdout, re.MULTILINE)
-    expected = [("pyvalueobjects/_core.py", "no-untyped-def"), ("pyvalueobjects/_core.py", "return-value")]
-    assert [(path.replace("\\", "/"), code) for path, code in errors] == expected, run.stdout + run.stderr
+    expected = [
+        ("pyvalueobjects/_core.py", "no-untyped-def"),
+        ("pyvalueobjects/_core.py", "return-value"),
+        ("tests/static/check_api.py", "assignment"),
+    ]
+    assert sorted((path.replace("\\", "/"), code) for path, code in errors) == expected, run.stdout + run.stderr
 
 
 def test_ruff_lints_the_new_modules_of_this_repository() -> None:

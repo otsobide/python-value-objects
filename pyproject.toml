@@ -72,7 +72,7 @@ exclude_also = ["@overload", "if TYPE_CHECKING:"]
 [tool.mypy]
 strict = true
 python_version = "3.11"
-files = ["pyvalueobjects"]
+files = ["pyvalueobjects", "tests/static"]
 # Transitional: the 0.x code is not annotated. `exclude` skips its files, and the override silences
 # the modules that pyvalueobjects/__init__.py still imports, because mypy follows imports.
 exclude = ['^pyvalueobjects/_legacy/']

@@ -16,7 +16,7 @@ uv run pytest tests/test_project.py::test_warnings_are_errors   # one test; -k E
 make check                                           # the default goal: lint, typecheck, then cov
 make lint                                            # ruff check + ruff format --check
 make format                                          # ruff check --fix + ruff format
-make typecheck                                       # mypy --strict on pyvalueobjects/
+make typecheck                                       # mypy --strict on pyvalueobjects/ and tests/static/
 make cov                                             # the suite with branch coverage
 make build                                           # sdist and wheel in dist/
 make clean                                           # removes build outputs and tool caches
@@ -49,7 +49,7 @@ Type checks are strict (`type(value) != int`), so `bool` and subclasses are reje
 
 **Public API.** Users import everything from `pyvalueobjects/__init__.py`. The legacy modules import one another, and the 0.x tests import them, by full module path (`pyvalueobjects._legacy.numbers.int`), never through the package root, so the root exports can change without breaking them.
 
-**Adding a value object** never touches `_legacy/`. A 1.0 value object is a declaration on the core (`ValueObject`, `Scalar`, `Bounded`, `Sized`, `literal()`, `binary_op`/`unary_op`). Adding one touches: its family module and that module's `__all__`; the import and `__all__` entry in `pyvalueobjects/__init__.py` (a new family module also joins `FAMILIES` in `tests/test_contract.py`); one `Sample` in `tests/samples.py`, which runs the generic contract tests on it (equality, hashing, immutability, pickling, copying, `repr`, `from_optional`, wrong types and more); and the family's own test module next to `tests/test_core.py`. `EmailAddress`, `Ipv4`, `Ipv6`, `MacAddress`, `Md5Hash`, `Sha256Hash`, `Url` and their nullable variants exist in `pyvalueobjects/_legacy/security/` but are not exported, tested, or documented; 1.0 replaces them.
+**Adding a value object** never touches `_legacy/`. A 1.0 value object is a declaration on the core (`ValueObject`, `Scalar`, `Bounded`, `Sized`, `literal()`, `binary_op`/`unary_op`). Adding one touches: its family module and that module's `__all__`; the import and `__all__` entry in `pyvalueobjects/__init__.py` (a new family module also joins `FAMILIES` in `tests/test_contract.py`); one `Sample` in `tests/samples.py`, which runs the generic contract tests on it (equality, hashing, immutability, pickling, copying, `repr`, `from_optional`, wrong types and more); the family's own test module next to `tests/test_core.py`; and `assert_type` lines for its typed API in `tests/static/check_api.py`, which mypy checks and pytest never runs. `EmailAddress`, `Ipv4`, `Ipv6`, `MacAddress`, `Md5Hash`, `Sha256Hash`, `Url` and their nullable variants exist in `pyvalueobjects/_legacy/security/` but are not exported, tested, or documented; 1.0 replaces them.
 
 ## Tests
 
