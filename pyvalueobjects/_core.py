@@ -34,8 +34,17 @@ S = TypeVar("S", bound="Scalar[Any]")
 
 
 def show(value: object) -> str:
-    """repr() truncated to 80 characters, for error messages."""
-    text = repr(value)
+    """repr() truncated to 80 characters, for error messages.
+
+    An int with more digits than ``sys.get_int_max_str_digits()`` has no repr; it is shown by its
+    size instead, so that building a validation error never raises a plain ValueError.
+    """
+    try:
+        text = repr(value)
+    except ValueError:
+        if not isinstance(value, int):
+            raise
+        return f"<{'negative ' if value < 0 else ''}int with {value.bit_length()} bits>"
     return text if len(text) <= 80 else f"{text[:77]}..."
 
 

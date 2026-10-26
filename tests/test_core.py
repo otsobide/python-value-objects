@@ -12,7 +12,7 @@ import pickle
 import re
 import sys
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import FrozenInstanceError, dataclass
 from decimal import Decimal
 from fractions import Fraction
@@ -170,6 +170,39 @@ def test_show_never_exceeds_80_characters_and_keeps_the_repr_prefix(value: objec
     text, shown = repr(value), show(value)
     assert len(shown) <= 80
     assert shown == (text if len(text) <= 80 else text[:77] + "...")
+
+
+HUGE = 10**5000  # 5001 digits: more than the default sys.get_int_max_str_digits() of 4300
+
+
+@pytest.fixture
+def int_digit_limit() -> Iterator[int]:
+    """Pins the int-to-str digit limit to its default, whatever PYTHONINTMAXSTRDIGITS says."""
+    before = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(4300)
+    yield 4300
+    sys.set_int_max_str_digits(before)
+
+
+@pytest.mark.usefixtures("int_digit_limit")
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [(HUGE, "<int with 16610 bits>"), (-HUGE, "<negative int with 16610 bits>")],
+    ids=["positive", "negative"],
+)
+def test_show_gives_the_size_of_an_int_too_long_for_repr(value: int, shown: str) -> None:
+    with pytest.raises(ValueError, match="Exceeds the limit"):
+        repr(value)
+    assert show(value) == shown
+
+
+def test_show_lets_other_repr_errors_through() -> None:
+    class Broken:
+        def __repr__(self) -> str:
+            raise ValueError("broken repr")
+
+    with pytest.raises(ValueError, match=r"^broken repr$"):
+        show(Broken())
 
 
 # ------------------------------------------------------------------------------------------- ValueObject
@@ -1367,6 +1400,26 @@ def test_bounded_float_rejects_nan() -> None:
     with pytest.raises(OutOfRangeError, match=r"^Probability: value must be >= 0, got nan$") as info:
         Probability(float("nan"))
     assert math.isnan(info.value.value)  # type: ignore[arg-type]
+
+
+@pytest.mark.usefixtures("int_digit_limit")
+@pytest.mark.parametrize(
+    ("cls", "raw", "error", "message"),
+    [
+        (Age, HUGE, OutOfRangeError, "Age: value must be <= 150, got <int with 16610 bits>"),
+        (Age, -HUGE, OutOfRangeError, "Age: value must be >= 0, got <negative int with 16610 bits>"),
+        (Ratio, HUGE, InvalidFormatError, "Ratio: cannot parse <int with 16610 bits>"),  # float() overflows
+    ],
+    ids=["above", "below", "unconvertible"],
+)
+def test_an_int_too_long_for_repr_still_gives_a_validation_error(
+    cls: type[Scalar[Any]], raw: int, error: type[ValueObjectError], message: str
+) -> None:
+    """Review of #40: building the message called repr() on the int, so a plain ValueError escaped."""
+    with pytest.raises(error) as info:
+        cls(raw)
+    assert type(info.value) is error and str(info.value) == message and info.value.value == raw
+    assert cls.is_valid(raw) is False
 
 
 def test_bounds_run_after_the_type_gate() -> None:
