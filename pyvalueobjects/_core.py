@@ -120,14 +120,18 @@ _signature = functools.cache(inspect.signature)  # per class, for the arity chec
 
 
 class ValueObjectMeta(ABCMeta):
-    """Gives every value-object class ``__slots__ = ()`` unless it declares its own slots,
-    so no instance ever has a ``__dict__``. Subclasses ABCMeta, so VOs combine with ``abc.ABC``."""
+    """Gives every value-object class ``__slots__ = ()`` unless it declares its own slots, and refuses a
+    class whose instances would still get a ``__dict__`` (a base class without ``__slots__``, or a
+    ``__dict__`` slot), so no instance ever has one. Subclasses ABCMeta, so VOs combine with ``abc.ABC``."""
 
     def __new__(
         mcs, name: str, bases: tuple[type, ...], namespace: dict[str, Any], /, **kwargs: Any
     ) -> ValueObjectMeta:
         namespace.setdefault("__slots__", ())
-        return super().__new__(mcs, name, bases, namespace, **kwargs)
+        cls = super().__new__(mcs, name, bases, namespace, **kwargs)
+        if cls.__dictoffset__:
+            raise TypeError(f"{name}: instances would have a __dict__; give every base class __slots__ = ()")
+        return cls
 
 
 class ValueObject(metaclass=ValueObjectMeta):

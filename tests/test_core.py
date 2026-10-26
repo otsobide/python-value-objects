@@ -311,6 +311,41 @@ def test_metaclass_gives_slots_to_classes_that_declare_none() -> None:
     assert dynamic.__dict__["__slots__"] == () and not hasattr(dynamic("x"), "__dict__")
 
 
+class Greeter:
+    """A plain mixin without __slots__."""
+
+    def greet(self) -> str:
+        return "hi"
+
+
+@pytest.mark.parametrize(
+    ("bases", "namespace"),
+    [((Greeter, Label), {}), ((Label, Greeter), {}), ((Label,), {"__slots__": ("__dict__",)})],
+    ids=["mixin-first", "mixin-last", "dict-slot"],
+)
+def test_a_class_whose_instances_would_have_a_dict_is_rejected(
+    bases: tuple[type, ...], namespace: dict[str, Any]
+) -> None:
+    """Review of #40: a mixin without __slots__ gave instances a __dict__, so `vo.__dict__["x"] = 1` added state."""
+    with pytest.raises(
+        TypeError, match=r"^Leaky: instances would have a __dict__; give every base class __slots__ = \(\)$"
+    ):
+        type("Leaky", bases, namespace)
+
+
+def test_a_mixin_with_empty_slots_is_accepted() -> None:
+    class Polite:
+        __slots__ = ()
+
+        def greet(self) -> str:
+            return "hi"
+
+    class Greeting(Polite, Label):
+        pass
+
+    assert Greeting("a").greet() == "hi" and not hasattr(Greeting("a"), "__dict__")
+
+
 def test_value_objects_combine_with_abc() -> None:
     class Shape(ValueObject, abc.ABC):
         @abc.abstractmethod
