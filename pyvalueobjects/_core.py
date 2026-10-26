@@ -6,7 +6,7 @@ import operator
 from abc import ABCMeta
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Self, TypeVar
 
 __all__ = [
     "CurrencyMismatchError",
@@ -18,6 +18,8 @@ __all__ = [
     "ValueObjectError",
     "ValueObjectMeta",
 ]
+
+V = TypeVar("V", bound="ValueObject")
 
 
 # ----------------------------------------------------------------------------------------------- errors
@@ -83,7 +85,7 @@ class ValueObject(metaclass=ValueObjectMeta):
     Fields are the names in ``__slots__`` across the MRO, in declaration order; the constructor takes
     them positionally in that order. A slot ``_name`` is a private field exposed by a read-only
     property ``name`` (Scalar's ``_value`` / ``value``). From this one convention, ``repr``, pickling,
-    equality, hashing, ordering and ``__match_args__`` are generic.
+    equality, hashing, ordering, ``__match_args__`` and ``replace`` are generic.
     """
 
     __slots__ = ()
@@ -107,6 +109,22 @@ class ValueObject(metaclass=ValueObjectMeta):
             if hasattr(self, name):
                 raise FrozenInstanceError(f"cannot initialize {name!r} again: {type(self).__name__} is immutable")
             object.__setattr__(self, name, value)
+
+    @classmethod
+    def _component(cls, name: str, kind: type[V], raw: object) -> V:
+        """Coerce one constructor argument to exactly ``kind``; errors are re-raised in the name of ``cls``.
+
+        A subclass instance (a ``Price`` given for a ``Money`` field) is rebuilt as ``kind``, so stored
+        parts are canonical. Composites must be given an instance.
+        """
+        if type(raw) is kind:
+            return raw
+        try:
+            if isinstance(raw, kind):
+                return kind(*raw._astuple())
+        except ValueObjectError as exc:
+            raise type(exc)(f"{name}: {exc.reason}", vo=cls, value=exc.value) from exc
+        raise InvalidTypeError(f"{name} must be {kind.__name__}, got {type(raw).__name__}", vo=cls, value=raw)
 
     def _astuple(self) -> tuple[Any, ...]:
         return tuple(getattr(self, name) for name in self._fields)
@@ -150,6 +168,14 @@ class ValueObject(metaclass=ValueObjectMeta):
     def __delattr__(self, name: str) -> None:
         raise FrozenInstanceError(f"cannot delete {name!r}: {type(self).__name__} is immutable")
 
+    def replace(self, **changes: Any) -> Self:
+        """A copy with some fields changed, re-validated: ``address.replace(city="Madrid")``."""
+        if unknown := changes.keys() - set(self.__match_args__):
+            raise TypeError(f"{type(self).__name__} has no field(s) {sorted(unknown)}")
+        return type(self)(*(changes.get(name, getattr(self, name)) for name in self.__match_args__))
+
+    __replace__ = replace  # copy.replace() on Python 3.13+
+
     # copying and pickling: immutable, so copies are the object itself; unpickling re-validates
     def __copy__(self) -> Self:
         return self
@@ -162,3 +188,20 @@ class ValueObject(metaclass=ValueObjectMeta):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({', '.join(map(repr, self._astuple()))})"
+
+    # optional values and validity checks, for scalars and composites alike
+    @classmethod
+    def from_optional(cls, *args: Any) -> Self | None:
+        """None when every argument is None (a NULL column), otherwise ``cls(*args)``.
+
+        A partially-None composite (amount without currency) is corrupt data and raises."""
+        return None if args and all(arg is None for arg in args) else cls(*args)
+
+    @classmethod
+    def is_valid(cls, *args: Any) -> bool:
+        """Whether ``cls(*args)`` builds; only validation errors count, misuse (wrong arity) still raises."""
+        try:
+            cls(*args)
+        except ValueObjectError:
+            return False
+        return True

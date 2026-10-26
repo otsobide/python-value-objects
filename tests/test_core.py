@@ -6,6 +6,7 @@ import abc
 import copy
 import operator
 import pickle
+import sys
 import unittest
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError, dataclass
@@ -516,3 +517,166 @@ def test_copies_are_the_object_itself(obj: ValueObject) -> None:
     holder = [obj, {"key": obj}]
     cloned = copy.deepcopy(holder)
     assert cloned is not holder and cloned[0] is obj and cloned[1]["key"] is obj  # type: ignore[index]
+
+
+# ------------------------------------------------------------------------------------------- replace, optional values, components
+
+
+class Even(ValueObject):
+    __slots__ = ("n",)
+    n: int
+
+    def __init__(self, n: int) -> None:
+        if n % 2:
+            raise OutOfRangeError(f"n must be even, got {n}", vo=type(self), value=n)
+        self._set(n=n)
+
+
+class Unchecked(Even):
+    """A subclass that skips its parent's check, so rebuilding it as the parent fails."""
+
+    def __init__(self, n: int) -> None:
+        self._set(n=n)
+
+
+class LooseLabel(Label):
+    def __init__(self, text: Any) -> None:
+        self._set(text=text)
+
+
+class Parcel(ValueObject):
+    __slots__ = ("label", "origin")
+    label: Label
+    origin: Point
+
+    def __init__(self, label: Label, origin: Point) -> None:
+        cls = type(self)
+        self._set(label=cls._component("label", Label, label), origin=cls._component("origin", Point, origin))
+
+
+def test_replace_changes_the_named_fields_only() -> None:
+    point = Point3(1, 2, 3)
+    assert point.replace(z=9) == Point3(1, 2, 9) and point.replace(x=0, y=0) == Point3(0, 0, 3)
+    assert point == Point3(1, 2, 3)  # the original is untouched
+    assert point.replace() == point and type(UserId("u").replace(text="v")) is UserId
+
+
+def test_replace_uses_the_public_name_of_a_private_field() -> None:
+    assert Secret("a").replace(token="b") == Secret("b")
+    with pytest.raises(TypeError, match=r"^Secret has no field\(s\) \['_token'\]$"):
+        Secret("a").replace(_token="b")
+
+
+def test_replace_rejects_unknown_fields() -> None:
+    with pytest.raises(TypeError, match=r"^Point has no field\(s\) \['v', 'w'\]$"):
+        Point(1, 2).replace(w=1, v=2, x=3)
+
+
+def test_replace_validates_again() -> None:
+    with pytest.raises(InvalidTypeError, match=r"^Point: coordinates must be int$"):
+        Point(1, 2).replace(x="3")
+    assert Parcel(Label("a"), Point(0, 0)).replace(label=UserId("b")).label.__class__ is Label
+
+
+@given(st.integers(), st.integers(), st.integers())
+def test_replace_matches_a_fresh_construction(x: int, y: int, new_y: int) -> None:
+    assert Point(x, y).replace(y=new_y) == Point(x, new_y)
+
+
+@pytest.mark.skipif(sys.version_info < (3, 13), reason="copy.replace() exists from Python 3.13 on")
+def test_copy_replace_uses_replace() -> None:
+    assert copy.replace(Point(1, 2), y=5) == Point(1, 5)  # type: ignore[attr-defined]
+    with pytest.raises(TypeError, match="has no field"):
+        copy.replace(Point(1, 2), w=5)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(("cls", "nulls"), [(Label, 1), (UserId, 1), (Point, 2), (Point3, 3)])
+def test_from_optional_gives_none_when_every_argument_is_none(cls: type[ValueObject], nulls: int) -> None:
+    assert cls.from_optional(*[None] * nulls) is None
+
+
+@pytest.mark.parametrize(
+    ("cls", "args"), [(Label, ("a",)), (UserId, ("u",)), (Point, (1, 2)), (Point3, (1, 2, 3)), (Secret, ("s",))]
+)
+def test_from_optional_builds_from_values(cls: type[ValueObject], args: tuple[Any, ...]) -> None:
+    built = cls.from_optional(*args)
+    assert built == cls(*args) and type(built) is cls
+
+
+@pytest.mark.parametrize("args", [(1, None), (None, 2)])
+def test_from_optional_rejects_a_partly_null_composite(args: tuple[Any, ...]) -> None:
+    with pytest.raises(InvalidTypeError, match=r"^Point: coordinates must be int$"):
+        Point.from_optional(*args)
+
+
+def test_from_optional_without_arguments_is_a_call_error() -> None:
+    with pytest.raises(TypeError, match="missing 2 required positional arguments"):
+        Point.from_optional()
+
+
+@pytest.mark.parametrize(
+    ("cls", "args", "valid"),
+    [
+        (Label, ("a",), True),
+        (Label, (1,), False),  # InvalidTypeError
+        (Even, (2,), True),
+        (Even, (3,), False),  # OutOfRangeError
+        (Point, (1, 2), True),
+        (Point, (1, None), False),
+    ],
+)
+def test_is_valid_reports_validation_errors(cls: type[ValueObject], args: tuple[Any, ...], valid: bool) -> None:
+    assert cls.is_valid(*args) is valid
+
+
+@pytest.mark.parametrize(("cls", "args"), [(Point, (1,)), (Label, ("a", "b")), (ValueObject, ()), (Headless, ())])
+def test_is_valid_does_not_hide_misuse(cls: type[ValueObject], args: tuple[Any, ...]) -> None:
+    with pytest.raises(TypeError) as info:
+        cls.is_valid(*args)
+    assert not isinstance(info.value, ValueObjectError)
+
+
+def test_component_keeps_an_instance_of_exactly_the_kind() -> None:
+    label, origin = Label("a"), Point(1, 2)
+    parcel = Parcel(label, origin)
+    assert parcel.label is label and parcel.origin is origin
+
+
+def test_component_rebuilds_a_subclass_instance_as_the_kind() -> None:
+    parcel = Parcel(UserId("u"), Point(1, 2))
+    assert type(parcel.label) is Label and parcel.label == Label("u")
+    assert parcel == Parcel(Label("u"), Point(1, 2)) and parcel == Parcel(OrderId("u"), Point(1, 2))
+
+
+@pytest.mark.parametrize(
+    ("label", "origin", "message"),
+    [
+        ("a", Point(1, 2), "label must be Label, got str"),
+        (None, Point(1, 2), "label must be Label, got NoneType"),
+        (Label("a"), (1, 2), "origin must be Point, got tuple"),
+        (Label("a"), Label("a"), "origin must be Point, got Label"),
+    ],
+)
+def test_component_requires_an_instance_for_a_composite(label: Any, origin: Any, message: str) -> None:
+    with pytest.raises(InvalidTypeError, match=f"^Parcel: {message}$") as info:
+        Parcel(label, origin)
+    assert info.value.vo is Parcel and info.value.value in (label, origin) and info.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "raw", "error", "reason", "value"),
+    [
+        (Label, LooseLabel(5), InvalidTypeError, "label: text must be str, got int", 5),
+        (Even, Unchecked(3), OutOfRangeError, "count: n must be even, got 3", 3),
+    ],
+)
+def test_component_relabels_errors_with_the_composite_and_field_name(
+    kind: type[ValueObject], raw: ValueObject, error: type[ValueObjectError], reason: str, value: object
+) -> None:
+    name = reason.split(":")[0]
+    with pytest.raises(error) as info:
+        Parcel._component(name, kind, raw)
+    err = info.value
+    assert type(err) is error and str(err) == f"Parcel: {reason}"
+    assert (err.reason, err.vo, err.value) == (reason, Parcel, value)
+    assert isinstance(err.__cause__, error) and err.__cause__.vo is kind
