@@ -378,6 +378,27 @@ def test_a_slot_with_two_leading_underscores_is_rejected(slot: str) -> None:
             __slots__ = ("a", slot)
 
 
+def test_a_declared_match_args_must_agree_with_the_slots() -> None:
+    """Review of #40: a different __match_args__ was silently replaced, although replace() passes fields in its order."""
+    with pytest.raises(
+        TypeError, match=r"^Swapped: __match_args__ must be \('a', 'b'\), the fields in order, got \('b', 'a'\)$"
+    ):
+
+        class Swapped(ValueObject):
+            __slots__ = ("a", "b")
+            __match_args__ = ("b", "a")
+
+
+def test_a_declared_match_args_that_agrees_is_kept() -> None:
+    """Spelled out for type checkers, as Scalar does."""
+
+    class Spelled(ValueObject):
+        __slots__ = ("a", "_b")
+        __match_args__ = ("a", "b")
+
+    assert Spelled.__match_args__ == ("a", "b") and Spelled._fields == ("a", "_b")
+
+
 def test_match_by_position_and_keyword() -> None:
     match Point3(1, 2, 3):
         case Point3(1, y, z=3):

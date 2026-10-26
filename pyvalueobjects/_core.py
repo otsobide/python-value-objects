@@ -147,7 +147,10 @@ class ValueObject(metaclass=ValueObjectMeta):
         if hidden := next((name for name in slots if name.startswith("__")), None):  # mangled or reserved
             raise TypeError(f"{cls.__name__}: slot {hidden!r} cannot be a field: a private field takes one underscore")
         cls._fields = tuple(dict.fromkeys(slots))
-        setattr(cls, "__match_args__", tuple(name.removeprefix("_") for name in cls._fields))  # noqa: B010
+        match_args = tuple(name.removeprefix("_") for name in cls._fields)
+        if (declared := cls.__dict__.get("__match_args__", match_args)) != match_args:  # replace() relies on it
+            raise TypeError(f"{cls.__name__}: __match_args__ must be {match_args}, the fields in order, got {declared}")
+        setattr(cls, "__match_args__", match_args)  # noqa: B010
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         raise TypeError(f"{type(self).__name__} is abstract: subclass it and define __init__")
