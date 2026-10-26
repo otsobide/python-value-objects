@@ -1,11 +1,5 @@
-class ValueObjectError(Exception):
-    """
-    Custom exception raised when a value object validation fails or when an invalid operation is performed on a value object.
-    """
+"""0.x import path of the error: the class is pyvalueobjects._core.ValueObjectError, a ValueError."""
 
-    def __init__(self, message: str):
-        """
-        Initialize the ValueObjectError with a specific error message.
-        :param message: A string describing the error that occurred.
-        """
-        self.message = message
+from pyvalueobjects._core import ValueObjectError
+
+__all__ = ["ValueObjectError"]
