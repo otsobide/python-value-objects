@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import abc
 import copy
+import datetime
+import enum
 import operator
 import pickle
 import sys
 import unittest
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError, dataclass
+from fractions import Fraction
 from typing import Any
 from unittest import mock
 
@@ -24,6 +27,7 @@ from pyvalueobjects._core import (
     InvalidTypeError,
     OutOfRangeError,
     PrecisionError,
+    Scalar,
     ValueObject,
     ValueObjectError,
     ValueObjectMeta,
@@ -680,3 +684,282 @@ def test_component_relabels_errors_with_the_composite_and_field_name(
     assert type(err) is error and str(err) == f"Parcel: {reason}"
     assert (err.reason, err.vo, err.value) == (reason, Parcel, value)
     assert isinstance(err.__cause__, error) and err.__cause__.vo is kind
+
+
+# ------------------------------------------------------------------------------------------- Scalar
+
+
+class Count(Scalar[int]):
+    accepts = (int,)
+
+
+class Small(Count):
+    @classmethod
+    def _validate(cls, value: int) -> int:
+        value = super()._validate(value)
+        if value > 9:
+            raise OutOfRangeError(f"value must be <= 9, got {value}", vo=cls, value=value)
+        return value
+
+
+class Ratio(Scalar[float]):
+    accepts = (float, int)
+
+    @classmethod
+    def _convert(cls, raw: float) -> float:
+        return float(raw)
+
+
+class Code(Scalar[str]):
+    """Normalizes to upper case, then requires ASCII letters."""
+
+    accepts = (str,)
+
+    @classmethod
+    def _validate(cls, value: str) -> str:
+        value = super()._validate(value).strip().upper()
+        if not (value.isascii() and value.isalpha()):
+            raise InvalidFormatError(f"expected letters, got {show(value)}", vo=cls, value=value)
+        return value
+
+
+class ShortCode(Code):
+    @classmethod
+    def _validate(cls, value: str) -> str:
+        value = super()._validate(value)  # the parent normalizes first, so the stripped text is measured
+        if len(value) > 3:
+            raise OutOfRangeError(f"length must be <= 3, got {len(value)}", vo=cls, value=value)
+        return value
+
+
+class Hex(Scalar[int]):
+    """Takes an int or hexadecimal text."""
+
+    accepts = (int, str)
+
+    @classmethod
+    def _convert(cls, raw: int | str) -> int:
+        return int(raw, 16) if isinstance(raw, str) else raw
+
+
+class Day(Scalar[datetime.date]):
+    accepts = (datetime.date,)
+
+
+class Reciprocal(Scalar[Fraction]):
+    """Not a lawful scalar (it does not accept its own stored type): only for the ArithmeticError case."""
+
+    accepts = (int,)
+
+    @classmethod
+    def _convert(cls, raw: int) -> Fraction:
+        return 1 / Fraction(raw)
+
+
+class Status(enum.IntEnum):
+    ACTIVE = 1
+
+
+class Shade(enum.StrEnum):
+    RED = "red"
+
+
+class Loud(str):
+    def __str__(self) -> str:
+        return "LOUD"
+
+
+class Heavy(float):
+    pass
+
+
+SCALARS = [Count(0), Count(-7), Count(2**100), Small(3), Ratio(0.5), Ratio(2), Code(" ab "), ShortCode("x")]
+SCALARS += [Hex(255), Hex("10"), Day(datetime.date(2024, 2, 29))]
+
+
+@pytest.fixture(params=SCALARS, ids=repr)
+def scalar(request: pytest.FixtureRequest) -> Scalar[Any]:
+    return request.param  # type: ignore[no-any-return]
+
+
+def test_scalar_fields_and_match_args() -> None:
+    assert Count._fields == ("_value",) and Count.__match_args__ == ("value",) and Day.__match_args__ == ("value",)
+    match Count(5):
+        case Count(5):
+            pass
+        case _:
+            pytest.fail("Count(5) did not match")
+
+
+class AbstractCode(Code, abstract=True):
+    pass
+
+
+@pytest.mark.parametrize("cls", [Scalar, AbstractCode])
+def test_abstract_scalars_cannot_be_built(cls: type[Scalar[Any]]) -> None:
+    with pytest.raises(TypeError, match=f"^{cls.__name__} is abstract: subclass it$"):
+        cls("x")
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "value"),
+    [
+        (Count, 5, 5),
+        (Count, 2**200, 2**200),
+        (Ratio, 2, 2.0),
+        (Ratio, -0.5, -0.5),
+        (Code, " ab ", "AB"),
+        (Hex, "ff", 255),
+        (Hex, 16, 16),
+        (Day, datetime.date(2024, 2, 29), datetime.date(2024, 2, 29)),
+    ],
+)
+def test_value_is_the_converted_and_normalized_input(cls: type[Scalar[Any]], raw: Any, value: Any) -> None:
+    built = cls(raw)
+    assert built.value == value and type(built.value) is type(value)
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "expected"),
+    [
+        (Count, "1", "expected int, got str"),
+        (Count, 1.0, "expected int, got float"),
+        (Count, None, "expected int, got NoneType"),
+        (Count, True, "expected int, got bool"),  # bool is never an int
+        (Count, False, "expected int, got bool"),
+        (Count, Fraction(1), "expected int, got Fraction"),
+        (Hex, True, "expected int or str, got bool"),
+        (Ratio, True, "expected float or int, got bool"),
+        (Ratio, "1", "expected float or int, got str"),
+        (Code, b"x", "expected str, got bytes"),
+        (Code, Status.ACTIVE, "expected str, got Status"),  # an enum of a type that is not accepted
+        (Count, Shade.RED, "expected int, got Shade"),
+        (Day, datetime.datetime(2024, 1, 1), "expected date, got datetime"),  # a datetime is never a date
+        (Count, Point(1, 2), "expected int, got Point"),  # composites are not unwrapped
+    ],
+)
+def test_type_gate_rejects_types_not_accepted(cls: type[Scalar[Any]], raw: Any, expected: str) -> None:
+    with pytest.raises(InvalidTypeError, match=f"^{cls.__name__}: {expected}$") as info:
+        cls(raw)
+    assert info.value.vo is cls and info.value.value is raw and info.value.reason == expected
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "value"),
+    [
+        (Count, Status.ACTIVE, 1),
+        (Ratio, Status.ACTIVE, 1.0),
+        (Ratio, Heavy(1.5), 1.5),
+        (Code, Shade.RED, "RED"),
+        (Code, Loud("q"), "Q"),  # the str value, not the overridden __str__
+    ],
+)
+def test_instances_of_int_float_str_subclasses_become_the_plain_type(
+    cls: type[Scalar[Any]], raw: Any, value: Any
+) -> None:
+    built = cls(raw)
+    assert built.value == value and type(built.value) is type(value) and built == cls(value)
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "cause"),
+    [(Hex, "zz", ValueError), (Hex, "", ValueError), (Reciprocal, 0, ZeroDivisionError)],
+)
+def test_convert_errors_become_invalid_format_errors(cls: type[Scalar[Any]], raw: Any, cause: type[Exception]) -> None:
+    with pytest.raises(InvalidFormatError, match=f"^{cls.__name__}: cannot parse {show(raw)}$") as info:
+        cls(raw)
+    assert type(info.value) is InvalidFormatError and info.value.value == raw
+    assert type(info.value.__cause__) is cause
+
+
+def test_value_object_errors_from_convert_pass_through_unchanged() -> None:
+    raised = OutOfRangeError("too big", value=1)
+
+    class Strict(Scalar[int]):
+        accepts = (int,)
+
+        @classmethod
+        def _convert(cls, raw: int) -> int:
+            raise raised
+
+    with pytest.raises(OutOfRangeError) as info:
+        Strict(1)
+    assert info.value is raised and info.value.__cause__ is None
+
+
+def test_other_exceptions_from_convert_are_not_validation_errors() -> None:
+    class Buggy(Scalar[int]):
+        accepts = (int,)
+
+        @classmethod
+        def _convert(cls, raw: int) -> int:
+            raise KeyError(raw)
+
+    with pytest.raises(KeyError):
+        Buggy(1)
+
+
+@pytest.mark.parametrize(
+    ("raw", "error", "message"),
+    [
+        (" abcd ", OutOfRangeError, "ShortCode: length must be <= 3, got 4"),
+        ("a1", InvalidFormatError, "ShortCode: expected letters, got 'A1'"),  # the parent check names the subclass
+    ],
+)
+def test_validate_chain_runs_the_parent_first(raw: str, error: type[ValueObjectError], message: str) -> None:
+    assert ShortCode(" ab ").value == "AB"
+    with pytest.raises(error) as info:
+        ShortCode(raw)
+    assert str(info.value) == message and info.value.vo is ShortCode
+
+
+@pytest.mark.parametrize("name", ["value", "_value"])
+def test_value_is_read_only(name: str) -> None:
+    count = Count(1)
+    with pytest.raises(FrozenInstanceError):
+        setattr(count, name, 2)
+    assert count.value == 1
+
+
+def test_regression_C03_scalar_init_cannot_run_again_on_a_live_object() -> None:
+    """C03 (#33): `PositiveInt(1).__init__(2)` changed a set member in place."""
+    count = Count(1)
+    members = {count}
+    with pytest.raises(FrozenInstanceError, match=r"^cannot initialize '_value' again: Count is immutable$"):
+        count.__init__(2)  # type: ignore[misc]
+    assert count.value == 1 and count in members and Count(1) in members
+
+
+def test_idempotence_law(scalar: Scalar[Any]) -> None:
+    """Every scalar accepts its own stored type, so rebuilding from .value gives an equal object."""
+    cls = type(scalar)
+    assert cls(scalar.value) == scalar and cls(*scalar._astuple()) == scalar
+
+
+def test_scalar_round_trips(scalar: Scalar[Any]) -> None:
+    cls = type(scalar)
+    for protocol in PROTOCOLS:
+        assert pickle.loads(pickle.dumps(scalar, protocol)) == scalar
+    assert copy.copy(scalar) is scalar and copy.deepcopy(scalar) is scalar
+    assert scalar.replace(value=scalar.value) == scalar and cls.from_optional(scalar.value) == scalar
+    assert cls.from_optional(None) is None and cls.is_valid(scalar.value)
+
+
+def test_scalars_equal_only_within_one_type() -> None:
+    assert Count(1) == Count(1) and Count(1) != Small(1) and Count(1) != Ratio(1) and Count(1) != Hex(1)
+    assert Count(1) != 1 and Code("ab") != "AB" and len({Count(1), Small(1), Hex(1), Count(1)}) == 3
+    assert Count(1) < Count(2) and Code("b") > Code("a")
+    with pytest.raises(TypeError):
+        _ = Count(1) < Small(2)
+
+
+@given(st.integers())
+def test_int_scalar_properties(number: int) -> None:
+    count = Count(number)
+    assert count.value == number and count == Count(number) and hash(count) == hash(Count(number))
+
+
+@given(st.text())
+def test_is_valid_agrees_with_construction(text: str) -> None:
+    normalized = text.strip().upper()
+    assert Code.is_valid(text) is (normalized.isascii() and normalized.isalpha())

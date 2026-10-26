@@ -6,7 +6,7 @@ import operator
 from abc import ABCMeta
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError
-from typing import Any, ClassVar, Self, TypeVar
+from typing import Any, ClassVar, Generic, Self, TypeVar
 
 __all__ = [
     "CurrencyMismatchError",
@@ -14,11 +14,14 @@ __all__ = [
     "InvalidTypeError",
     "OutOfRangeError",
     "PrecisionError",
+    "Scalar",
     "ValueObject",
     "ValueObjectError",
     "ValueObjectMeta",
 ]
 
+T = TypeVar("T")
+R = TypeVar("R")
 V = TypeVar("V", bound="ValueObject")
 
 
@@ -205,3 +208,69 @@ class ValueObject(metaclass=ValueObjectMeta):
         except ValueObjectError:
             return False
         return True
+
+
+# ----------------------------------------------------------------------------------------------- Scalar
+
+
+_PLAIN = (int, float, str)  # subclasses of these (IntEnum, StrEnum members) are accepted as the plain type
+
+
+class Scalar(ValueObject, Generic[T], abstract=True):
+    """A value object wrapping exactly one value, exposed as the read-only ``.value``.
+
+    Pipeline: ``_parse`` (type gate against ``accepts``, then ``_convert``)
+    -> ``_validate`` (cooperative chain of checks and normalizations, each returning the value).
+    """
+
+    __slots__ = ("_value",)
+    __match_args__ = ("value",)
+    _value: T
+
+    accepts: ClassVar[tuple[type, ...]] = ()
+
+    def __init__(self, value: object) -> None:
+        cls = type(self)
+        if cls._abstract:
+            raise TypeError(f"{cls.__name__} is abstract: subclass it")
+        if hasattr(self, "_value"):
+            raise FrozenInstanceError(f"cannot initialize '_value' again: {cls.__name__} is immutable")
+        object.__setattr__(self, "_value", cls._validate(cls._parse(value)))
+
+    @property
+    def value(self) -> T:
+        return self._value
+
+    def _astuple(self) -> tuple[Any, ...]:
+        return (self._value,)
+
+    @classmethod
+    def _parse(cls, raw: Any) -> T:
+        kind = type(raw)
+        if kind not in cls.accepts:
+            plain = next((t for t in _PLAIN if t in cls.accepts and isinstance(raw, t)), None)
+            if plain is None or kind is bool:
+                expected = " or ".join(t.__name__ for t in cls.accepts)
+                raise InvalidTypeError(f"expected {expected}, got {kind.__name__}", vo=cls, value=raw)
+            raw = str.__str__(raw) if plain is str else plain(raw)
+        return cls._guard(cls._convert, raw)
+
+    @classmethod
+    def _convert(cls, raw: Any) -> T:
+        """Turn an accepted raw input into the stored type. Plain ValueError/ArithmeticError
+        raised here become InvalidFormatError."""
+        return raw  # type: ignore[no-any-return]
+
+    @classmethod
+    def _validate(cls, value: T) -> T:
+        """Check constraints and normalize. Overrides call ``super()._validate`` and return the value."""
+        return value
+
+    @classmethod
+    def _guard(cls, func: Callable[[Any], R], raw: object) -> R:
+        try:
+            return func(raw)
+        except ValueObjectError:
+            raise
+        except (ValueError, ArithmeticError) as exc:
+            raise InvalidFormatError(f"cannot parse {show(raw)}", vo=cls, value=raw) from exc
