@@ -518,6 +518,15 @@ def test_equal_when_same_type_and_fields(obj: ValueObject) -> None:
     assert twin == obj and hash(twin) == hash(obj) and twin is not obj and (twin != obj) is False
 
 
+def test_hash_is_the_hash_of_the_type_and_the_fields(obj: ValueObject) -> None:
+    """Spec 2.1. Review of #40: dropping the type from the hash survived every other test."""
+    assert hash(obj) == hash((type(obj), obj._astuple()))
+
+
+def test_hash_differs_between_types_with_the_same_fields() -> None:
+    assert hash(UserId("u")) != hash(OrderId("u")) and hash(Label("u")) != hash(UserId("u"))
+
+
 def test_different_fields_are_not_equal() -> None:
     assert Point(1, 2) != Point(2, 1) and Point3(1, 2, 3) != Point3(1, 2, 4) and Label("a") != Label("A")
 

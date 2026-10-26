@@ -1,10 +1,13 @@
 """Static typing contract: checked by mypy --strict, never executed."""
 
 import operator
+import re
+from collections.abc import Callable
+from datetime import date
 from typing import assert_type
 
 from pyvalueobjects import Bounded, InvalidTypeError, Scalar, Sized, ValueObject, ValueObjectError
-from pyvalueobjects._core import binary_op, unary_op
+from pyvalueobjects._core import binary_op, literal, unary_op
 
 
 class Code(Scalar[str]):
@@ -58,6 +61,8 @@ assert_type(-Age(1), Age)
 assert_type(str(Code("a")), str)
 assert_type(InvalidTypeError("bad", vo=Code, value=1).vo, type | None)
 assert_type(ValueObjectError("bad").reason, str)
+assert_type(literal(re.compile("[0-9]+"), int), Callable[[str], int])
+assert_type(literal(re.compile("[0-9-]+"), date.fromisoformat), Callable[[str], date])
 match Code("a"):
     case Code(value):
         assert_type(value, str)
