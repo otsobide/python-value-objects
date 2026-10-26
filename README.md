@@ -6,7 +6,7 @@
 [![GitHub](https://img.shields.io/github/license/n1nj4t4nuk1/python-value-objects)](https://github.com/n1nj4t4nuk1/python-value-objects/blob/main/LICENSE)
 [![Pypi](https://img.shields.io/pypi/v/pyvalueobjects)](https://pypi.org/project/pyvalueobjects/)
 [![Downloads](https://pepy.tech/badge/pyvalueobjects)](https://pepy.tech/project/pyvalueobjects)
-[![GA](https://github.com/n1nj4t4nuk1/python-value-objects/workflows/Tests/badge.svg)](https://github.com/n1nj4t4nuk1/python-value-objects/actions/workflows/test.yml)
+[![Tests](https://github.com/otsobide/python-value-objects/actions/workflows/tests.yml/badge.svg)](https://github.com/otsobide/python-value-objects/actions/workflows/tests.yml)
  
 </div>
 &nbsp;

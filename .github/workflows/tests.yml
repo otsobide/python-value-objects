@@ -1,29 +1,41 @@
 name: Tests
-
 on:
-    push:
-    pull_request:
-    schedule:
-        - cron: '00 09 * * *'
-
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 9 * * 1"        # weekly (was daily)
+permissions:
+  contents: read
 jobs:
-    tests:
-        runs-on: ubuntu-latest
-        strategy:
-          matrix:
-            python-version: [ '3.9', '3.10', '3.11', '3.12', '3.13' ]
-            os: ['ubuntu-latest']
-        steps:
-            - name: Clone and checkout branch
-              uses: actions/checkout@v2
-
-            - name: Set up Python ${{ matrix.python-version }} in ${{ matrix.os }} OS.
-              uses: actions/setup-python@v2
-              with:
-                python-version: ${{ matrix.python-version }}
-
-            - name: Build project
-              run: make
-
-            - name: Run tests
-              run: make test
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+    env:
+      HYPOTHESIS_PROFILE: ci
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked
+      - run: uv run pytest --cov
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"   # the oldest supported version catches newer-only syntax and typing
+      - run: uv sync --locked
+      - run: make lint typecheck
+      - run: make build && uvx twine check --strict dist/*
+      - name: The wheel ships every module of the source tree
+        run: |
+          python3 -c "import pathlib, sys, zipfile; missing = {p.as_posix() for p in pathlib.Path('pyvalueobjects').rglob('*.py')} - set(zipfile.ZipFile(sys.argv[1]).namelist()); assert not missing, sorted(missing)" dist/*.whl
+      - name: The wheel installs alone and declares no dependencies
+        run: |
+          uv venv /tmp/smoke -p 3.11 && uv pip install -p /tmp/smoke dist/*.whl
+          /tmp/smoke/bin/python -I -c "import importlib.metadata as m, pyvalueobjects as v; assert not m.requires('pyvalueobjects'); assert m.metadata('pyvalueobjects')['Requires-Python'] == '>=3.11'; v.PositiveInt(1)"

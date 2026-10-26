@@ -547,3 +547,91 @@ def test_make_quality_targets(target: str, commands: list[str]) -> None:
 
 def test_make_check_runs_lint_then_types_then_coverage() -> None:
     assert make("check") == make("lint") + make("typecheck") + make("cov")
+
+
+# ------------------------------------------------------------------------------------------- continuous integration
+
+WORKFLOWS = ROOT / ".github" / "workflows"
+CI = (WORKFLOWS / "tests.yml").read_text(encoding="utf-8")
+CI_JOBS = dict(
+    re.findall(r"^  ([a-z-]+):\n(.*?)(?=^  [a-z-]+:\n|\Z)", CI.split("\njobs:\n", 1)[1], re.MULTILINE | re.DOTALL)
+)
+README = (ROOT / "README.md").read_text(encoding="utf-8")
+REPOSITORY = "otsobide/python-value-objects"
+
+
+def make_calls(text: str) -> list[str]:
+    """Every target named in a `make ...` command of `text`."""
+    return [target for m in re.finditer(r"\bmake((?: [a-z][a-z-]*)+)", text) for target in m[1].split()]
+
+
+def test_ci_has_a_test_matrix_and_a_quality_job() -> None:
+    assert sorted(CI_JOBS) == ["quality", "test"]
+
+
+def test_ci_tests_every_supported_python() -> None:
+    [matrix] = re.findall(r"^ +python: \[(.*)\]$", CI_JOBS["test"], re.MULTILINE)
+    assert re.findall(r'"(3\.\d+)"', matrix) == [f"{major}.{minor}" for major, minor in classifier_versions()]
+    assert "fail-fast: false" in CI_JOBS["test"]
+
+
+def test_ci_quality_job_runs_on_the_oldest_supported_python() -> None:
+    major, minor = python_floor()
+    assert re.findall(r'python-version: "([\d.]+)"', CI_JOBS["quality"]) == [f"{major}.{minor}"]
+    assert f"uv venv /tmp/smoke -p {major}.{minor}" in CI_JOBS["quality"]
+
+
+@pytest.mark.parametrize("job", ["test", "quality"])
+def test_ci_installs_exactly_what_uv_lock_pins(job: str) -> None:
+    assert "uses: astral-sh/setup-uv@" in CI_JOBS[job]
+    assert "uv sync --locked" in CI_JOBS[job]
+    assert "setup-python" not in CI_JOBS[job]
+    assert "pip install -r" not in CI_JOBS[job]
+
+
+def test_ci_runs_the_suite_with_coverage() -> None:
+    assert "uv run pytest --cov" in CI_JOBS["test"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "make lint typecheck",
+        "make build && uvx twine check --strict dist/*",
+        "rglob('*.py')",  # the wheel ships every module of the source tree (#32 C45)
+        "/tmp/smoke/bin/python -I -c",  # -I: import the installed wheel, not the checkout in the working directory
+        "assert not m.requires('pyvalueobjects')",
+        "m.metadata('pyvalueobjects')['Requires-Python'] == '>=3.11'",
+    ],
+)
+def test_ci_quality_job_checks_lint_types_and_the_built_wheel(command: str) -> None:
+    assert command in CI_JOBS["quality"]
+
+
+@pytest.mark.parametrize("target", make_calls(CI))
+def test_ci_only_calls_existing_make_targets(target: str) -> None:
+    assert target in MAKE_TARGETS
+
+
+def test_ci_token_is_read_only() -> None:
+    assert re.search(r"^permissions:\n  contents: read\n", CI, re.MULTILINE)
+
+
+@pytest.mark.parametrize("action", sorted(set(re.findall(r"uses: (\S+)", CI))))
+def test_ci_actions_are_pinned_to_a_major_version(action: str) -> None:
+    assert re.fullmatch(r"[\w-]+/[\w-]+@v\d+", action)
+
+
+@pytest.mark.parametrize(
+    "link", sorted(set(re.findall(r"https://github\.com/([^)\s]+?/actions/workflows/[^)\s/]+)", README)))
+)
+def test_readme_badges_point_at_existing_workflows(link: str) -> None:
+    """The 0.28.1 badge linked a test.yml that never existed (#32 C52)."""
+    repository, workflow = link.split("/actions/workflows/")
+    assert repository == REPOSITORY
+    assert (WORKFLOWS / workflow).is_file()
+
+
+def test_readme_shows_the_ci_status_badge() -> None:
+    badge = f"https://github.com/{REPOSITORY}/actions/workflows/tests.yml/badge.svg"
+    assert f"[![Tests]({badge})](https://github.com/{REPOSITORY}/actions/workflows/tests.yml)" in README
