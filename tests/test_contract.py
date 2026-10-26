@@ -56,7 +56,7 @@ def test_samples_are_distinct(sample: Sample) -> None:
 class TestValid:
     def test_equal_and_same_hash(self, sample: Sample, raw: Any) -> None:
         a, b = sample.build(raw), sample.build(raw)
-        assert a == b and hash(a) == hash(b) and a is not b
+        assert a == b and (a != b) is False and hash(a) == hash(b) and a is not b
 
     def test_never_equal_to_other_types(self, sample: Sample, raw: Any) -> None:
         a = sample.build(raw)

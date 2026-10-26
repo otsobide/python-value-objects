@@ -208,7 +208,8 @@ def test_show_lets_other_repr_errors_through() -> None:
 
 
 # ------------------------------------------------------------------------------------------- ValueObject
-# Throwaway composites, declared at module level so that they pickle by reference.
+# Throwaway composites, declared at module level so that they pickle by reference. The generic contract
+# (equality, hashing, pickling, copying, repr, from_optional...) runs on them through CORE_SAMPLES at the end.
 
 
 class Point(ValueObject):
@@ -514,11 +515,6 @@ def test_repr_lists_the_fields() -> None:
     ]
 
 
-def test_equal_when_same_type_and_fields(obj: ValueObject) -> None:
-    twin = type(obj)(*obj._astuple())
-    assert twin == obj and hash(twin) == hash(obj) and twin is not obj and (twin != obj) is False
-
-
 def test_hash_is_the_hash_of_the_type_and_the_fields(obj: ValueObject) -> None:
     """Spec 2.1. Review of #40: dropping the type from the hash survived every other test."""
     assert hash(obj) == hash((type(obj), obj._astuple()))
@@ -636,16 +632,6 @@ def test_ordering_against_another_type_raises_type_error(
         op(left, right)
 
 
-def test_repr_evaluates_back(obj: ValueObject) -> None:
-    assert eval(repr(obj), globals()) == obj  # our own repr: safe to evaluate
-
-
-@pytest.mark.parametrize("protocol", PROTOCOLS)
-def test_pickle_round_trip(obj: ValueObject, protocol: int) -> None:
-    restored = pickle.loads(pickle.dumps(obj, protocol))
-    assert restored == obj and type(restored) is type(obj) and restored is not obj
-
-
 def test_unpickling_validates_again() -> None:
     class Tampered:
         def __reduce__(self) -> tuple[Any, ...]:
@@ -655,8 +641,7 @@ def test_unpickling_validates_again() -> None:
         pickle.loads(pickle.dumps(Tampered()))
 
 
-def test_copies_are_the_object_itself(obj: ValueObject) -> None:
-    assert copy.copy(obj) is obj and copy.deepcopy(obj) is obj
+def test_deepcopy_of_a_container_shares_its_value_objects(obj: ValueObject) -> None:
     holder = [obj, {"key": obj}]
     cloned = copy.deepcopy(holder)
     assert cloned is not holder and cloned[0] is obj and cloned[1]["key"] is obj  # type: ignore[index]
@@ -986,7 +971,6 @@ class Tagged(ValueObject):
 
 SCALARS = [Count(0), Count(-7), Count(2**100), Small(3), Ratio(0.5), Ratio(2), Code(" ab "), ShortCode("x")]
 SCALARS += [Hex(255), Hex("10"), Day(datetime.date(2024, 2, 29))]
-SCALAR_EVAL = {**globals(), "datetime": datetime}
 
 
 @pytest.fixture(params=SCALARS, ids=repr)
@@ -1181,18 +1165,7 @@ def test_regression_C03_scalar_init_cannot_run_again_on_a_live_object() -> None:
 def test_idempotence_law(scalar: Scalar[Any]) -> None:
     """Every scalar accepts its own stored type, so rebuilding from .value or from itself gives an equal object."""
     cls = type(scalar)
-    assert cls(scalar.value) == scalar and cls(scalar) == scalar and cls(*scalar._astuple()) == scalar
-
-
-def test_scalar_round_trips(scalar: Scalar[Any]) -> None:
-    cls = type(scalar)
-    for protocol in PROTOCOLS:
-        assert pickle.loads(pickle.dumps(scalar, protocol)) == scalar
-    assert copy.copy(scalar) is scalar and copy.deepcopy(scalar) is scalar
-    assert eval(repr(scalar), SCALAR_EVAL) == scalar  # our own repr: safe to evaluate
-    assert cls.from_str(str(scalar)) == scalar
-    assert scalar.replace(value=scalar.value) == scalar and cls.from_optional(scalar.value) == scalar
-    assert cls.from_optional(None) is None and cls.is_valid(scalar.value)
+    assert cls(scalar.value) == scalar and cls(scalar) == scalar and scalar.replace(value=scalar.value) == scalar
 
 
 @pytest.mark.parametrize("nulls", [2, 3])
@@ -1554,14 +1527,9 @@ class Adult(Age):
     ge = 18  # overrides one bound, inherits le
 
 
-class Probability(Bounded[float]):
-    accepts = (float, int)
+class Probability(Bounded[float], Ratio):
     ge = 0
     le = 1
-
-    @classmethod
-    def _convert(cls, raw: float) -> float:
-        return float(raw)
 
 
 class Future(Bounded[datetime.date]):
@@ -1764,14 +1732,9 @@ class PositiveUnits(Units):
     gt = 0
 
 
-class Real(Scalar[float]):
-    accepts = (float, int)
+class Real(Ratio):
     operand_types = (float, int)
     __pow__ = binary_op(operator.pow)
-
-    @classmethod
-    def _convert(cls, raw: float) -> float:
-        return float(raw)
 
 
 class Span(Scalar[datetime.timedelta]):
