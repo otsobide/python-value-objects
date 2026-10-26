@@ -16,7 +16,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from pyvalueobjects import numeric
-from pyvalueobjects._core import Bounded, InvalidFormatError, InvalidTypeError, OutOfRangeError, show
+from pyvalueobjects._core import Bounded, InvalidFormatError, InvalidTypeError, OutOfRangeError, PrecisionError, show
 from pyvalueobjects.numeric import (
     Float,
     Int,
@@ -493,6 +493,26 @@ def test_an_int_beyond_the_float_range_is_out_of_range(raw: int, shown: str) -> 
     with pytest.raises(OutOfRangeError) as info:
         Float(raw)
     assert str(info.value) == f"Float: too large for a float, got {shown}" and len(shown) == 80
+
+
+@pytest.mark.parametrize("cls", [Float, PositiveFloat])
+@pytest.mark.parametrize("raw", [2**53 + 1, 2**60 + 1, 10**23, 3**40])
+def test_regression_X03_an_int_that_no_float_holds_exactly_is_refused(cls: type[Float], raw: int) -> None:
+    """X03 (#34): 0.x Float.from_int(2**53 + 1) silently stored 9007199254740992.0. Convert explicitly to round."""
+    with pytest.raises(PrecisionError) as info:
+        cls(raw)
+    assert str(info.value) == f"{cls.__name__}: not exactly representable as a float, got {raw}"
+    assert cls(float(raw)).value == float(raw)
+
+
+@given(st.integers(-(2**1100), 2**1100))
+def test_an_int_converts_exactly_or_not_at_all(number: int) -> None:
+    try:
+        assert Float(number).value == number
+    except PrecisionError:
+        assert float(number) != number
+    except OutOfRangeError:
+        assert abs(number) > sys.float_info.max
 
 
 @pytest.mark.parametrize(

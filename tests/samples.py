@@ -53,7 +53,7 @@ SAMPLES: list[Sample] = [
     Sample(
         numeric.Float,
         [0.0, -1.5, 1e300, 5e-324, 3],
-        invalid=[float("nan"), float("inf"), 10**400],
+        invalid=[float("nan"), float("inf"), 10**400, 2**53 + 1],
         wrong_type=NOT_FLOAT,
         normalized=[(3, "3.0"), (-0.0, "0.0"), (Level.HIGH, "3.0")],
     ),

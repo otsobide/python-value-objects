@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from pyvalueobjects._core import (
     Bounded,
     OutOfRangeError,
+    PrecisionError,
     Scalar,
     T,
     binary_op,
@@ -122,7 +123,7 @@ class NegativeInt(NegativeOrZeroInt):
 
 
 class Float(Numeric[float]):
-    """Finite binary float; ``int`` input is converted, ``-0.0`` becomes ``0.0``."""
+    """Finite binary float; ``-0.0`` becomes ``0.0``. An int is converted only when a float holds it exactly."""
 
     accepts = (float, int)
     operand_types = (float, int)
@@ -137,9 +138,12 @@ class Float(Numeric[float]):
     @classmethod
     def _convert(cls, raw: float) -> float:
         try:
-            return float(raw) + 0.0  # int -> float; -0.0 -> 0.0
+            value = float(raw) + 0.0  # int -> float; -0.0 -> 0.0
         except OverflowError:
             raise OutOfRangeError(f"too large for a float, got {show(raw)}", vo=cls, value=raw) from None
+        if isinstance(raw, int) and value != raw:  # float() rounds an int beyond 2**53 silently
+            raise PrecisionError(f"not exactly representable as a float, got {show(raw)}", vo=cls, value=raw)
+        return value
 
     @classmethod
     def _validate(cls, value: float) -> float:
