@@ -610,6 +610,14 @@ MYPY_LEGACY = sorted(module for o in MYPY.get("overrides", []) if o.get("ignore_
 MYPY_EXCLUDE = [MYPY["exclude"]] if isinstance(MYPY.get("exclude"), str) else MYPY.get("exclude", [])
 
 
+def write_tree(root: Path, files: dict[str, str]) -> None:
+    """Write `files` ({relative path: text}) under `root`, next to a copy of this pyproject.toml."""
+    shutil.copy(ROOT / "pyproject.toml", root)
+    for path, text in files.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(text, encoding="utf-8")
+
+
 def ruff_files(root: Path) -> set[str]:
     """Files that `ruff check .` lints under `root`, relative to it."""
     run = subprocess.run(
@@ -655,13 +663,90 @@ def test_ruff_and_mypy_skip_the_same_legacy_packages() -> None:
 
 
 def test_ruff_lints_new_code_and_skips_legacy_code(tmp_path: Path) -> None:
-    shutil.copy(ROOT / "pyproject.toml", tmp_path)
     new = ["pyvalueobjects/__init__.py", "pyvalueobjects/_core.py", "tests/__init__.py", "tests/test_core.py"]
-    legacy = [f"{path}/module.py" for path in RUFF_LEGACY]
-    for path in new + legacy:
-        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / path).touch()
+    write_tree(tmp_path, dict.fromkeys(new + [f"{path}/module.py" for path in RUFF_LEGACY], ""))
     assert ruff_files(tmp_path) == {"pyproject.toml", *new}
+
+
+TOO_LONG = "# " + "x" * 119  # 121 characters, one over the line length
+RUFF_FAMILIES = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PT", "C4", "PIE"]
+RUFF_PROBE = f'''\
+import sys
+import os
+from typing import List
+
+import pytest
+
+{TOO_LONG}
+
+
+class Probe:
+    __slots__ = ("b", "a")  # RUF023 stays off: the order is the constructor's field order
+
+
+def probe(items: List[int] = []) -> object:
+    """Trips at least one rule of every selected family."""
+    pass
+    if items == None:
+        return "\\d"
+    try:
+        squares = list(x * x for x in items)
+    except Exception:
+        pass
+    return [1] + squares, sys.path[0].startswith("a") or sys.path[0].startswith("b")
+
+
+@pytest.mark.parametrize("a,b", [(1, 2)])
+def test_probe(a: int, b: int) -> None:
+    assert a
+'''
+RUFF_TEST_PROBE = f"""\
+{TOO_LONG}
+KELVIN = "\u212a"
+
+
+def test_probe() -> None:
+    assert KELVIN and 1
+"""
+
+
+def test_ruff_enforces_the_rule_set_and_the_test_exemptions(tmp_path: Path) -> None:
+    """Each selected family flags the probe, while RUF023 and the exemptions for tests/ stay quiet."""
+    write_tree(tmp_path, {"pyvalueobjects/_core.py": RUFF_PROBE, "tests/test_probe.py": RUFF_TEST_PROBE})
+    run = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", "--no-cache", "--output-format=concise", "."],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    found = re.findall(r"^(\S+?):\d+:\d+: ([A-Z]+[0-9]+)", run.stdout, re.MULTILINE)
+    codes = {code for path, code in found if path.replace("\\", "/") == "pyvalueobjects/_core.py"}
+    families = {
+        next((f for f in RUFF_FAMILIES if code.startswith(f) and code[len(f)].isdigit()), code) for code in codes
+    }
+    assert families == set(RUFF_FAMILIES), run.stdout
+    assert "E501" in codes
+    assert "RUF023" not in codes
+    assert [path for path, _ in found if path.replace("\\", "/") != "pyvalueobjects/_core.py"] == [], run.stdout
+
+
+def test_mypy_checks_new_code_strictly_and_skips_legacy_code(tmp_path: Path) -> None:
+    """The 0.x packages need `exclude` and the `ignore_errors` override, because mypy follows the package imports."""
+    legacy = [path for path in RUFF_LEGACY if path.startswith("pyvalueobjects/")]
+    untyped = 'def legacy(value):\n    return value + 1\n\n\nWRONG: int = "s"\n'
+    files = {f"{path}/module.py": untyped for path in legacy}  # no __init__.py, like the 0.x subpackages
+    files["pyvalueobjects/__init__.py"] = "".join(
+        f"from {path.replace('/', '.')}.module import legacy as _{Path(path).name}\n" for path in legacy
+    )
+    files["pyvalueobjects/_core.py"] = (
+        'def untyped(value):\n    return value\n\n\ndef wrong() -> int:\n    return "s"\n'
+    )
+    write_tree(tmp_path, files)
+    run = subprocess.run([sys.executable, "-m", "mypy"], cwd=tmp_path, capture_output=True, text=True, check=False)
+    errors = re.findall(r"^(\S+?):\d+: error: .*\[([\w-]+)\]$", run.stdout, re.MULTILINE)
+    expected = [("pyvalueobjects/_core.py", "no-untyped-def"), ("pyvalueobjects/_core.py", "return-value")]
+    assert [(path.replace("\\", "/"), code) for path, code in errors] == expected, run.stdout + run.stderr
 
 
 def test_ruff_lints_the_new_modules_of_this_repository() -> None:
