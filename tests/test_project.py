@@ -275,14 +275,22 @@ TEST_MODULES = sorted(
 )
 
 
-COLLECT = """
-import decimal, fractions, sys  # loaded first, as by any library module that uses Decimal or Fraction
+REPORT_TAG = "collection report: "
+COLLECT = f"""
+import decimal, fractions, json, sys  # loaded first, as by any library module that uses Decimal or Fraction
 import pytest
 code = pytest.main(["--collect-only", "-q", "-p", "no:cacheprovider"])
 import numbers
-print("stdlib numbers:", numbers.__file__, fractions.Fraction(1, 3) + 1)
+print({REPORT_TAG!r} + json.dumps({{"numbers": numbers.__file__, "fraction": str(fractions.Fraction(1, 3) + 1)}}))
 sys.exit(code)
 """
+
+
+def collection_report(lines: list[str]) -> dict[str, Any]:
+    """The JSON report that COLLECT prints on its tagged line: paths may contain spaces."""
+    [report] = [line.removeprefix(REPORT_TAG) for line in lines if line.startswith(REPORT_TAG)]
+    parsed: dict[str, Any] = json.loads(report)
+    return parsed
 
 
 @pytest.fixture(scope="module")
@@ -455,13 +463,25 @@ def test_regression_C43_test_modules_are_imported_under_the_tests_package(reques
 
 def test_regression_C43_collection_keeps_the_stdlib_numbers_module(collection: list[str]) -> None:
     """With `decimal` imported first, 0.28.1 discovery failed with "'numbers' is not a package"."""
-    [report] = [line for line in collection if line.startswith("stdlib numbers:")]
-    _, path, fraction = report.rsplit(" ", 2)
-    assert Path(path).parent == Path(sysconfig.get_path("stdlib"))
-    assert fraction == "4/3"
+    report = collection_report(collection)
+    assert Path(report["numbers"]).parent == Path(sysconfig.get_path("stdlib"))
+    assert report["fraction"] == "4/3"
     import numbers
 
     assert Path(numbers.__file__).parent == Path(sysconfig.get_path("stdlib"))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "C:\\Program Files\\Python311\\Lib\\numbers.py",  # a python.org install on Windows
+        "/Users/Ada Lovelace/.local/share/uv/python/cpython-3.12/lib/python3.12/numbers.py",  # a home with a space
+    ],
+)
+def test_regression_C43_collection_report_keeps_paths_with_spaces(path: str) -> None:
+    """The report was one space-separated line, so a stdlib path with a space was cut (#39 review)."""
+    lines = ["tests/test_project.py::test_x", REPORT_TAG + json.dumps({"numbers": path, "fraction": "4/3"})]
+    assert collection_report(lines) == {"numbers": path, "fraction": "4/3"}
 
 
 # ------------------------------------------------------------------------------------------- lint and type checks
