@@ -1,7 +1,7 @@
 import unittest
 
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
-from pyvalueobjects.security.cpe import Cpe
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.security.cpe import Cpe
 
 
 class TestCpeIdValueObject(unittest.TestCase):

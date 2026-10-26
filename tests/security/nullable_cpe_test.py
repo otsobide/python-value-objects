@@ -1,7 +1,7 @@
 import unittest
 
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
-from pyvalueobjects.security.nullable_cpe import NullableCpe
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.security.nullable_cpe import NullableCpe
 
 
 class TestNullableCpeValueObject(unittest.TestCase):

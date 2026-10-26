@@ -1,7 +1,7 @@
 import unittest
 
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
-from pyvalueobjects.numbers.positive_float import PositiveFloat
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.numbers.positive_float import PositiveFloat
 
 
 class TestPositiveFloatValueObject(unittest.TestCase):

@@ -1,7 +1,7 @@
 import unittest
 
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
-from pyvalueobjects.numbers.negative_or_zero_int import NegativeOrZeroInt
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.numbers.negative_or_zero_int import NegativeOrZeroInt
 
 
 class TestNegativeOrZeroIntValueObject(unittest.TestCase):

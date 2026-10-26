@@ -1,9 +1,9 @@
 import unittest
 
-from pyvalueobjects.lists.array_list import ArrayList
-from pyvalueobjects.lists.nullable_array_list import NullableArrayList
-from pyvalueobjects.numbers.int import Int
-from pyvalueobjects.strings.string import String
+from pyvalueobjects._legacy.lists.array_list import ArrayList
+from pyvalueobjects._legacy.lists.nullable_array_list import NullableArrayList
+from pyvalueobjects._legacy.numbers.int import Int
+from pyvalueobjects._legacy.strings.string import String
 
 
 class TestNullableArrayListValueObject(unittest.TestCase):

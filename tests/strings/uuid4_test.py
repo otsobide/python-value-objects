@@ -1,8 +1,8 @@
 import unittest
 import uuid
 
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
-from pyvalueobjects.strings.uuid4 import Uuid4
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.strings.uuid4 import Uuid4
 
 
 class TestUuid4ValueObject(unittest.TestCase):

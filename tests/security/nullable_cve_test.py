@@ -1,7 +1,7 @@
 import unittest
 
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
-from pyvalueobjects.security.nullable_cve import NullableCve
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.security.nullable_cve import NullableCve
 
 
 class TestNullableCveValueObject(unittest.TestCase):

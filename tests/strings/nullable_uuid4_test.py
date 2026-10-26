@@ -1,8 +1,8 @@
 import unittest
 import uuid
 
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
-from pyvalueobjects.strings.nullable_uuid4 import NullableUuid4
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.strings.nullable_uuid4 import NullableUuid4
 
 
 class TestNullableUuid4ValueObject(unittest.TestCase):

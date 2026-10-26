@@ -1,7 +1,7 @@
 import unittest
 
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
-from pyvalueobjects.numbers.nullable_positive_or_zero_int import NullablePositiveOrZeroInt
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.numbers.nullable_positive_or_zero_int import NullablePositiveOrZeroInt
 
 
 class TestNullablePositiveIntValueObject(unittest.TestCase):

@@ -1,8 +1,8 @@
 import datetime
 import unittest
 
-from pyvalueobjects.dates.isodate import IsoDate
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.dates.isodate import IsoDate
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
 
 
 class TestIsoDateValueObject(unittest.TestCase):

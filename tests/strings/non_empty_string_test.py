@@ -1,7 +1,7 @@
 import unittest
 
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
-from pyvalueobjects.strings.non_empty_string import NonEmptyString
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.strings.non_empty_string import NonEmptyString
 
 
 class TestNonemptyStringValueObject(unittest.TestCase):

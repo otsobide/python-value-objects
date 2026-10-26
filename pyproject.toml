@@ -42,8 +42,7 @@ dev = [
     "tzdata>=2024.1; sys_platform == 'win32'",   # zoneinfo data for TimeZone tests on Windows (dev only)
 ]
 
-# Transitional until the 0.x code is gone: the legacy subpackages have no __init__.py,
-# so they are found as namespace packages (the default for packages.find in pyproject.toml).
+# Transitional until the 0.x code is gone: also ships pyvalueobjects._legacy and its subpackages.
 [tool.setuptools.packages.find]
 include = ["pyvalueobjects*"]
 
@@ -69,9 +68,6 @@ fail_under = 0  # transitional: 0.x code has no gate; 100 from the first 1.0 cor
 show_missing = true
 skip_covered = true
 exclude_also = ["@overload", "if TYPE_CHECKING:"]
-# Transitional: the 0.x subpackages have no __init__.py, and without this the modules that nothing imports
-# are left out of the report instead of counting as uncovered.
-include_namespace_packages = true
 
 [tool.mypy]
 strict = true
@@ -79,31 +75,17 @@ python_version = "3.11"
 files = ["pyvalueobjects"]
 # Transitional: the 0.x code is not annotated. `exclude` skips its files, and the override silences
 # the modules that pyvalueobjects/__init__.py still imports, because mypy follows imports.
-exclude = ['^pyvalueobjects/(abstract|dates|errors|lists|numbers|security|strings)/']
+exclude = ['^pyvalueobjects/_legacy/']
 
 [[tool.mypy.overrides]]
-module = [
-    "pyvalueobjects.abstract.*",
-    "pyvalueobjects.dates.*",
-    "pyvalueobjects.errors.*",
-    "pyvalueobjects.lists.*",
-    "pyvalueobjects.numbers.*",
-    "pyvalueobjects.security.*",
-    "pyvalueobjects.strings.*",
-]
+module = ["pyvalueobjects._legacy.*"]
 ignore_errors = true
 
 [tool.ruff]
 target-version = "py311"
 line-length = 120
 extend-exclude = [  # transitional: the 0.x code and its unittest suites
-    "pyvalueobjects/abstract",
-    "pyvalueobjects/dates",
-    "pyvalueobjects/errors",
-    "pyvalueobjects/lists",
-    "pyvalueobjects/numbers",
-    "pyvalueobjects/security",
-    "pyvalueobjects/strings",
+    "pyvalueobjects/_legacy",
     "tests/dates",
     "tests/lists",
     "tests/numbers",
@@ -116,5 +98,5 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PT", "C4", "PIE"]
 ignore = ["RUF023"]                     # __slots__ order is the constructor's field order: never sort it
 
 [tool.ruff.lint.per-file-ignores]
-"pyvalueobjects/__init__.py" = ["F401", "I001"]  # transitional: 0.x re-exports without __all__, in an order that matters
+"pyvalueobjects/__init__.py" = ["F401", "I001"]  # transitional: 0.x re-exports without __all__, grouped by family
 "tests/**" = ["E501", "RUF001", "PT018"] # wide sample tables, intentional confusables (Kelvin sign, Arabic digits)

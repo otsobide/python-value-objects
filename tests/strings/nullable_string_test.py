@@ -1,6 +1,6 @@
 import unittest
 
-from pyvalueobjects.strings.nullable_string import NullableString
+from pyvalueobjects._legacy.strings.nullable_string import NullableString
 
 
 class TestNullableStringValueObject(unittest.TestCase):

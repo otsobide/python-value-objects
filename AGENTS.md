@@ -31,7 +31,9 @@ make clean                                           # removes build outputs and
 
 ## Architecture
 
-**Validation chain.** `ValueObject.__init__` (`pyvalueobjects/abstract/valueobject.py`) calls `self._validate(value)` and then stores `_value`. Every subclass overrides `_validate` and calls `super()._validate(value)` first, so constraints accumulate through inheritance:
+The 0.x implementation lives in `pyvalueobjects/_legacy/` until each family is rebuilt on the 1.0 core; the package root re-exports it. The rest of this section describes that legacy code.
+
+**Validation chain.** `ValueObject.__init__` (`pyvalueobjects/_legacy/abstract/valueobject.py`) calls `self._validate(value)` and then stores `_value`. Every subclass overrides `_validate` and calls `super()._validate(value)` first, so constraints accumulate through inheritance:
 
 - `Int` → `PositiveOrZeroInt` → `PositiveInt`; `Int` → `NegativeOrZeroInt` → `NegativeInt`
 - `Float` → `PositiveFloat`; `Float` → `NegativeFloat` (`Float` also rejects NaN and infinities)
@@ -41,13 +43,13 @@ Type checks are strict (`type(value) != int`), so `bool` and subclasses are reje
 
 **Equality and hashing** are value-based, not type-based: `Int(1) == PositiveInt(1)` is `True`, and comparing against a non-`ValueObject` (`Int(1) == 1`) raises `ValueObjectError` instead of returning `False`.
 
-**Nullable variants.** `build_nullable(cls)` (`pyvalueobjects/abstract/nullablevalueobject.py`) returns a subclass whose `__init__` sets `_value = None` and skips validation when given `None`. Each `NullableX` lives in its own `nullable_x.py` module as `_nullable_cls = build_nullable(X)` followed by `class NullableX(_nullable_cls)` with a `value=None` default.
+**Nullable variants.** `build_nullable(cls)` (`pyvalueobjects/_legacy/abstract/nullablevalueobject.py`) returns a subclass whose `__init__` sets `_value = None` and skips validation when given `None`. Each `NullableX` lives in its own `nullable_x.py` module as `_nullable_cls = build_nullable(X)` followed by `class NullableX(_nullable_cls)` with a `value=None` default.
 
 **Lists.** `ArrayList(cls)` and `NullableArrayList(cls)` are factory functions that return a new class, used as `ArrayList(Int)([1, 2])`. Elements are validated by constructing `cls(element)` for each item. Generated classes are cached per element type in a module-level dict, so `ArrayList(Int) is ArrayList(Int)` and `isinstance` checks work; `NullableArrayList(Int)` subclasses the cached `ArrayList(Int)`.
 
-**Public API.** Users import everything from `pyvalueobjects/__init__.py`. `nullable_positive_int.py` and `nullable_negative_int.py` import their base class via `from pyvalueobjects import ...`, which only works because `__init__.py` imports the base before the nullable variant; keep that ordering, or use full submodule imports in new code.
+**Public API.** Users import everything from `pyvalueobjects/__init__.py`. The legacy modules import one another, and the 0.x tests import them, by full module path (`pyvalueobjects._legacy.numbers.int`), never through the package root, so the root exports can change without breaking them.
 
-Adding a value object touches: its module plus the `nullable_` counterpart, the export in `__init__.py`, `tests/<category>/<name>_test.py`, and a README section. `EmailAddress`, `Ipv4`, `Ipv6`, `MacAddress`, `Md5Hash`, `Sha256Hash`, `Url` and their nullable variants exist in `pyvalueobjects/security/` but are currently not exported, tested, or documented.
+Adding a value object touches: its module plus the `nullable_` counterpart, the export in `__init__.py`, `tests/<category>/<name>_test.py`, and a README section. `EmailAddress`, `Ipv4`, `Ipv6`, `MacAddress`, `Md5Hash`, `Sha256Hash`, `Url` and their nullable variants exist in `pyvalueobjects/_legacy/security/` but are currently not exported, tested, or documented.
 
 ## Tests
 

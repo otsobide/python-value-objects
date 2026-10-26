@@ -1,9 +1,9 @@
 import unittest
 
-from pyvalueobjects.errors.ValueObjectError import ValueObjectError
-from pyvalueobjects.lists.array_list import ArrayList
-from pyvalueobjects.numbers.int import Int
-from pyvalueobjects.strings.string import String
+from pyvalueobjects._legacy.errors.ValueObjectError import ValueObjectError
+from pyvalueobjects._legacy.lists.array_list import ArrayList
+from pyvalueobjects._legacy.numbers.int import Int
+from pyvalueobjects._legacy.strings.string import String
 
 
 class TestArrayListValueObject(unittest.TestCase):
