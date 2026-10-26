@@ -713,6 +713,37 @@ def test_from_optional_without_arguments_is_a_call_error() -> None:
 
 
 @pytest.mark.parametrize(
+    ("cls", "nulls", "message"),
+    [
+        (Point, 1, "missing a required argument: 'y'"),
+        (Point, 3, "too many positional arguments"),
+        (Label, 2, "too many positional arguments"),
+        (Point3, 2, "missing a required argument: 'z'"),
+    ],
+)
+def test_from_optional_with_the_wrong_number_of_nulls_is_a_call_error(
+    cls: type[ValueObject], nulls: int, message: str
+) -> None:
+    """Review of #40: Point.from_optional(None) returned None, so a forgotten column failed only on a non-NULL row."""
+    with pytest.raises(TypeError, match=rf"^{cls.__name__}\.from_optional\(\): {message}$") as info:
+        cls.from_optional(*[None] * nulls)
+    assert not isinstance(info.value, ValueObjectError) and info.value.__cause__ is None
+
+
+def test_from_optional_follows_the_constructor_signature() -> None:
+    class Weight(ValueObject):
+        __slots__ = ("amount", "unit")
+
+        def __init__(self, amount: int, unit: str = "kg") -> None:
+            self._set(amount=amount, unit=unit)
+
+    assert Weight.from_optional(None) is None and Weight.from_optional(None, None) is None
+    assert Weight.from_optional(5) == Weight(5, "kg")
+    with pytest.raises(TypeError, match=r"^Weight\.from_optional\(\): too many positional arguments$"):
+        Weight.from_optional(None, None, None)
+
+
+@pytest.mark.parametrize(
     ("cls", "args", "valid"),
     [
         (Label, ("a",), True),
@@ -1095,6 +1126,15 @@ def test_scalar_round_trips(scalar: Scalar[Any]) -> None:
     assert cls.from_str(str(scalar)) == scalar
     assert scalar.replace(value=scalar.value) == scalar and cls.from_optional(scalar.value) == scalar
     assert cls.from_optional(None) is None and cls.is_valid(scalar.value)
+
+
+@pytest.mark.parametrize("nulls", [2, 3])
+def test_scalar_from_optional_takes_one_argument(nulls: int) -> None:
+    """Review of #40: Count.from_optional(None, None) returned None instead of refusing the extra argument."""
+    with pytest.raises(TypeError, match=r"^Count\.from_optional\(\): too many positional arguments$"):
+        Count.from_optional(*[None] * nulls)
+    with pytest.raises(TypeError, match="takes 2 positional arguments but 3 were given"):
+        Count.from_optional(1, None)
 
 
 def test_scalars_equal_only_within_one_type() -> None:

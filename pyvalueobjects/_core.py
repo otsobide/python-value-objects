@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import decimal
+import functools
+import inspect
 import operator
 import re
 from abc import ABCMeta
@@ -112,6 +114,9 @@ def _declared_slots(klass: type) -> tuple[str, ...]:
     """The slot names a class declares itself. Python reads ``__slots__ = "name"`` as one slot, not four."""
     slots = klass.__dict__.get("__slots__", ())
     return (slots,) if isinstance(slots, str) else tuple(slots)
+
+
+_signature = functools.cache(inspect.signature)  # per class, for the arity check of from_optional
 
 
 class ValueObjectMeta(ABCMeta):
@@ -249,8 +254,15 @@ class ValueObject(metaclass=ValueObjectMeta):
     def from_optional(cls, *args: Any) -> Self | None:
         """None when every argument is None (a NULL column), otherwise ``cls(*args)``.
 
-        A partially-None composite (amount without currency) is corrupt data and raises."""
-        return None if args and all(arg is None for arg in args) else cls(*args)
+        A partially-None composite (amount without currency) is corrupt data and raises. A call that the
+        constructor would refuse (a forgotten column) raises TypeError even when every argument is None."""
+        if not args or any(arg is not None for arg in args):
+            return cls(*args)
+        try:
+            _signature(cls).bind(*args)
+        except TypeError as exc:
+            raise TypeError(f"{cls.__name__}.from_optional(): {exc}") from None
+        return None
 
     @classmethod
     def is_valid(cls, *args: Any) -> bool:
