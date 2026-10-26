@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import operator
+import re
 from abc import ABCMeta
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError
@@ -296,3 +297,23 @@ class Scalar(ValueObject, Generic[T], abstract=True):
     def __repr__(self) -> str:
         shown = str(self) if str in self.accepts else self._value
         return f"{type(self).__name__}({shown!r})"
+
+
+# ----------------------------------------------------------------------------------------------- helpers
+
+
+def literal(regex: re.Pattern[str], convert: Callable[[str], R]) -> Callable[[str], R]:
+    """Parser for an ASCII literal: strip, ``fullmatch`` the regex (else ValueError), then ``convert``.
+
+    Used for every non-string text format (int, decimal, ISO dates and times), so what is accepted
+    never depends on how int()/float()/Decimal()/fromisoformat() behave in a given Python version:
+    '1_000', '١٢', 'nan', '0x10', '20240131' and 'T24:00' are all rejected.
+    """
+
+    def parse(text: str) -> R:
+        text = text.strip()
+        if regex.fullmatch(text) is None:
+            raise ValueError(f"not a valid literal: {text!r}")
+        return convert(text)
+
+    return parse

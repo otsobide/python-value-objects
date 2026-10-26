@@ -8,6 +8,7 @@ import datetime
 import enum
 import operator
 import pickle
+import re
 import sys
 import unittest
 from collections.abc import Callable
@@ -31,6 +32,7 @@ from pyvalueobjects._core import (
     ValueObject,
     ValueObjectError,
     ValueObjectMeta,
+    literal,
     show,
 )
 
@@ -1127,3 +1129,93 @@ def test_component_relabels_scalar_errors(
     err = info.value
     assert type(err) is error and str(err) == f"Tagged: {reason}" and (err.vo, err.value) == (Tagged, value)
     assert type(err.__cause__) is error and err.__cause__.vo in (Code, Count)
+
+
+# ------------------------------------------------------------------------------------------- literal()
+
+INTEGER = literal(re.compile(r"[+-]?[0-9]+"), int)
+ISO_DATE = literal(re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}"), datetime.date.fromisoformat)
+
+
+class Whole(Scalar[int]):
+    accepts = (int,)
+    _parse_str = staticmethod(INTEGER)
+
+
+@pytest.mark.parametrize(
+    ("text", "value"),
+    [
+        ("42", 42),
+        ("-7", -7),
+        ("+7", 7),
+        ("007", 7),
+        ("-0", 0),
+        (" 12 ", 12),  # surrounding whitespace is stripped
+        ("\t12\n", 12),
+        ("9007199254740993", 9007199254740993),  # exact: never goes through float
+        (str(2**200), 2**200),
+    ],
+)
+def test_literal_accepts_the_grammar(text: str, value: int) -> None:
+    assert INTEGER(text) == value and type(INTEGER(text)) is int
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", " ", "1_000", "١٢", "１２", "0x10", "1.0", "1e3", "nan", "1 2", "12\n3", "--1", "+", "²"],
+)
+def test_literal_rejects_text_outside_the_grammar(text: str) -> None:
+    with pytest.raises(ValueError, match=r"^not a valid literal: ") as info:
+        INTEGER(text)
+    assert str(info.value) == f"not a valid literal: {text.strip()!r}"
+
+
+def test_literal_does_not_convert_rejected_text() -> None:
+    convert = mock.Mock(return_value=1)
+    parse = literal(re.compile(r"[0-9]+"), convert)
+    with pytest.raises(ValueError, match="not a valid literal"):
+        parse("1_0")
+    convert.assert_not_called()
+    assert parse(" 10 ") == 1
+    convert.assert_called_once_with("10")  # the stripped text
+
+
+@pytest.mark.parametrize("loose", ["20240131", "2024-W05-3", "2024W053"])
+def test_literal_pins_the_grammar_whatever_the_converter_accepts(loose: str) -> None:
+    assert datetime.date.fromisoformat(loose) == datetime.date(2024, 1, 31)  # the converter alone takes it
+    assert ISO_DATE(" 2024-01-31 ") == datetime.date(2024, 1, 31)
+    with pytest.raises(ValueError, match="not a valid literal"):
+        ISO_DATE(loose)
+
+
+@pytest.mark.parametrize(("parse", "text"), [(ISO_DATE, "2024-02-30"), (INTEGER, "1" * 4301)])
+def test_literal_lets_converter_errors_through(parse: Callable[[str], Any], text: str) -> None:
+    """The text matches the grammar, so the error is the converter's (an impossible day, too many digits)."""
+    with pytest.raises(ValueError, match=r"^(?!not a valid literal)"):  # any message but the grammar's
+        parse(text)
+
+
+@given(st.integers())
+def test_literal_round_trips_every_int(number: int) -> None:
+    assert INTEGER(str(number)) == number and INTEGER(f" {number:+d} ") == number
+
+
+@given(st.text(st.characters(categories=["Nd"]), min_size=1))
+def test_literal_accepts_only_ascii_digits(digits: str) -> None:
+    if digits.isascii():
+        assert INTEGER(digits) == int(digits)
+    else:
+        with pytest.raises(ValueError, match="not a valid literal"):
+            INTEGER(digits)
+
+
+@pytest.mark.parametrize(("text", "value"), [("9007199254740993", 9007199254740993), (" -12 ", -12)])
+def test_literal_as_parse_str(text: str, value: int) -> None:
+    assert Whole.from_str(text) == Whole(value)
+
+
+@pytest.mark.parametrize("text", ["1_000", "١٢", "1.0", "", "1" * 4301])
+def test_literal_errors_become_invalid_format_errors_in_from_str(text: str) -> None:
+    with pytest.raises(InvalidFormatError, match=f"^Whole: cannot parse {re.escape(show(text))}$") as info:
+        Whole.from_str(text)
+    assert type(info.value.__cause__) is ValueError and info.value.value == text
