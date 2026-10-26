@@ -142,8 +142,11 @@ class ValueObject(metaclass=ValueObjectMeta):
     def __init_subclass__(cls, *, abstract: bool = False, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         cls._abstract = abstract
-        slots = (name for klass in reversed(cls.__mro__) for name in _declared_slots(klass))
-        cls._fields = tuple(dict.fromkeys(name for name in slots if not name.startswith("__")))
+        slots = [name for klass in reversed(cls.__mro__) for name in _declared_slots(klass)]
+        slots = [name for name in slots if name not in ("__dict__", "__weakref__")]
+        if hidden := next((name for name in slots if name.startswith("__")), None):  # mangled or reserved
+            raise TypeError(f"{cls.__name__}: slot {hidden!r} cannot be a field: a private field takes one underscore")
+        cls._fields = tuple(dict.fromkeys(slots))
         setattr(cls, "__match_args__", tuple(name.removeprefix("_") for name in cls._fields))  # noqa: B010
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

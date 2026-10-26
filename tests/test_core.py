@@ -367,6 +367,17 @@ def test_dunder_slots_are_not_fields() -> None:
     assert Weak._fields == ("a",) and repr(Weak(1)) == "Weak(1)"
 
 
+@pytest.mark.parametrize("slot", ["__token", "__token__"])
+def test_a_slot_with_two_leading_underscores_is_rejected(slot: str) -> None:
+    """Review of #40: a name-mangled slot `__token` was silently left out of the fields, so == and hash ignored it."""
+    with pytest.raises(
+        TypeError, match=f"^Hidden: slot '{slot}' cannot be a field: a private field takes one underscore$"
+    ):
+
+        class Hidden(ValueObject):
+            __slots__ = ("a", slot)
+
+
 def test_match_by_position_and_keyword() -> None:
     match Point3(1, 2, 3):
         case Point3(1, y, z=3):
