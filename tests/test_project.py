@@ -525,7 +525,11 @@ def test_ci_hypothesis_profile_is_reproducible() -> None:
 
 
 def test_hypothesis_profile_comes_from_the_environment() -> None:
-    expected = settings.get_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
+    """The profile's name, not only its settings: 'dev' equals hypothesis's defaults, so without HYPOTHESIS_PROFILE
+    comparing settings passed even when conftest.py loaded no profile (review of #40)."""
+    name = os.environ.get("HYPOTHESIS_PROFILE", "dev")
+    assert settings.get_current_profile_name() == name
+    expected = settings.get_profile(name)
     assert settings().max_examples == expected.max_examples and settings().derandomize == expected.derandomize
 
 
