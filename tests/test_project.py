@@ -121,6 +121,16 @@ def test_python_classifiers_run_from_the_floor_without_gaps() -> None:
     assert "Programming Language :: Python :: 3 :: Only" in PROJECT["classifiers"]
 
 
+def test_regression_typed_classifier_comes_with_the_py_typed_marker() -> None:
+    """The metadata claimed `Typing :: Typed` before pyvalueobjects/py.typed existed (#39 review).
+
+    The classifier, the package data that ships the marker and the marker itself arrive together.
+    """
+    marker = (ROOT / "pyvalueobjects" / "py.typed").is_file()
+    assert ("Typing :: Typed" in PROJECT["classifiers"]) == marker
+    assert ("py.typed" in SETUPTOOLS.get("package-data", {}).get("pyvalueobjects", [])) == marker
+
+
 def test_license_is_an_spdx_expression_not_a_classifier() -> None:
     assert PROJECT["license"] == "MIT"
     assert PROJECT["license-files"] == ["LICENSE"]
