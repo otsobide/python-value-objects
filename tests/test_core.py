@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import abc
 import copy
+import operator
 import pickle
+import unittest
 from collections.abc import Callable
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, dataclass
 from typing import Any
+from unittest import mock
 
 import pytest
 from hypothesis import given
@@ -351,7 +354,7 @@ def test_regression_C03_init_cannot_run_again_on_a_live_object() -> None:
     with pytest.raises(FrozenInstanceError, match="cannot initialize 'text' again"):
         label.__init__("v")  # type: ignore[misc]
     assert point._astuple() == (1, 2, 3) and label.text == "u"
-    assert point in members and label in members
+    assert point in members and label in members and Point3(1, 2, 3) in members
 
 
 def test_failed_construction_raises_in_the_name_of_the_class() -> None:
@@ -374,3 +377,142 @@ def test_repr_lists_the_fields() -> None:
         "Secret('s')",
         "Version('1.10')",
     ]
+
+
+def test_equal_when_same_type_and_fields(obj: ValueObject) -> None:
+    twin = type(obj)(*obj._astuple())
+    assert twin == obj and hash(twin) == hash(obj) and twin is not obj and (twin != obj) is False
+
+
+def test_different_fields_are_not_equal() -> None:
+    assert Point(1, 2) != Point(2, 1) and Point3(1, 2, 3) != Point3(1, 2, 4) and Label("a") != Label("A")
+
+
+@given(st.integers(), st.integers(), st.integers(), st.integers())
+def test_equality_hash_and_order_follow_the_fields(a: int, b: int, c: int, d: int) -> None:
+    first, second = Point(a, b), Point(c, d)
+    assert (first == second) is ((a, b) == (c, d))
+    assert (first < second) is ((a, b) < (c, d)) and (first >= second) is ((a, b) >= (c, d))
+    if first == second:
+        assert hash(first) == hash(second)
+
+
+@pytest.mark.parametrize(
+    "other",
+    [None, 1, "a", ("a",), ["a"], object(), mock.sentinel.value],
+    ids=["None", "int", "str", "tuple", "list", "object", "sentinel"],
+)
+def test_regression_C00_comparing_with_a_non_value_object_is_false(other: object) -> None:
+    """C00 (#33): `vo == None`, `1 == vo` and `vo != None` raised ValueObjectError instead of answering."""
+    label = Label("a")
+    assert (label == other) is False and (other == label) is False
+    assert (label != other) is True and (other != label) is True
+
+
+def test_regression_C00_value_objects_mix_with_raw_values_in_containers() -> None:
+    """C00 (#33): `in`, dict/set lookups and list methods crashed on a raw value before the match."""
+    label = Label("a")
+    mixed = [1, None, "a", label]
+    assert label in mixed and mixed.index(label) == 3 and mixed.count(label) == 1
+    mixed.remove(label)
+    assert mixed == [1, None, "a"]
+    assert len({label, 1, "a"}) == 3 and label not in {1: 0, "a": 1}
+
+    class SameHash:  # a raw key whose hash collides, so the dict has to call __eq__
+        def __hash__(self) -> int:
+            return hash(label)
+
+    assert label not in {SameHash(): 0} and SameHash() not in {label: 0}
+
+
+def test_regression_C00_entities_with_an_optional_value_object_compare() -> None:
+    """C00 (#33): frozen-dataclass entities with an optional VO field crashed on ==."""
+
+    @dataclass(frozen=True)
+    class Order:
+        quantity: Label | None
+
+    assert Order(Label("a")) != Order(None) and Order(Label("a")) == Order(Label("a"))
+    assert len({Order(Label("a")), Order(None), Order(Label("a"))}) == 2
+
+
+def test_regression_C00_unittest_and_mock_assertions_work() -> None:
+    """C00 (#33): assertNotEqual and mock.assert_called_with raised ValueObjectError, `vo == ANY` too."""
+    case = unittest.TestCase()  # the unittest assertions are the subject here, hence the PT009 waivers
+    case.assertNotEqual(Label("a"), None)  # noqa: PT009
+    case.assertIn(Label("a"), [None, Label("a")])  # noqa: PT009
+    with pytest.raises(AssertionError):
+        case.assertEqual(Label("a"), "a")  # noqa: PT009
+    called = mock.Mock()
+    called(Label("a"))
+    called.assert_called_with(Label("a"))
+    with pytest.raises(AssertionError):
+        called.assert_called_with("a")
+    assert Label("a") == mock.ANY
+
+
+def test_regression_X00_sibling_types_with_the_same_value_differ() -> None:
+    """X00 (#33): UserId(x) == OrderId(x), so a dict keyed by UserId answered an OrderId lookup."""
+    assert UserId("u") != OrderId("u") and (UserId("u") == OrderId("u")) is False
+    assert {UserId("u"): "user"}.get(OrderId("u")) is None
+    assert len({UserId("u"), OrderId("u"), UserId("u")}) == 2
+
+
+@pytest.mark.parametrize(("parent", "child"), [(Label("u"), UserId("u")), (Label("1.0"), Version("1.0"))])
+def test_regression_X00_parent_and_child_types_with_the_same_value_differ(parent: Label, child: Label) -> None:
+    """X00 (#33): equality ignored the type, also between a class and its subclass (Int(1) == PositiveInt(1))."""
+    assert parent != child and child != parent and len({parent, child}) == 2
+
+
+def test_ordering_within_one_type() -> None:
+    assert sorted([Point(2, 0), Point(1, 5), Point(1, 2)]) == [Point(1, 2), Point(1, 5), Point(2, 0)]
+    assert Point(1, 2) <= Point(1, 2) and Point(1, 2) >= Point(1, 2) and not Point(1, 2) < Point(1, 2)
+    assert Point(1, 2) < Point(1, 3) and Point(1, 3) > Point(1, 2) and not Point(1, 3) <= Point(1, 2)
+    assert max(Label("a"), Label("b")) == Label("b")
+
+
+def test_ordering_uses_the_order_key() -> None:
+    assert Version("1.9") < Version("1.10") and Label("1.9") > Label("1.10")
+    assert sorted([Version("1.10"), Version("1.9"), Version("0.99")]) == [
+        Version("0.99"),
+        Version("1.9"),
+        Version("1.10"),
+    ]
+
+
+@pytest.mark.parametrize("op", [operator.lt, operator.le, operator.gt, operator.ge])
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [(Label("a"), "a"), ("a", Label("a")), (Label("a"), None), (UserId("u"), OrderId("u")), (Label("u"), UserId("u"))],
+)
+def test_ordering_against_another_type_raises_type_error(
+    op: Callable[[object, object], bool], left: object, right: object
+) -> None:
+    with pytest.raises(TypeError, match="not supported between instances"):
+        op(left, right)
+
+
+def test_repr_evaluates_back(obj: ValueObject) -> None:
+    assert eval(repr(obj), globals()) == obj  # our own repr: safe to evaluate
+
+
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+def test_pickle_round_trip(obj: ValueObject, protocol: int) -> None:
+    restored = pickle.loads(pickle.dumps(obj, protocol))
+    assert restored == obj and type(restored) is type(obj) and restored is not obj
+
+
+def test_unpickling_validates_again() -> None:
+    class Tampered:
+        def __reduce__(self) -> tuple[Any, ...]:
+            return (Point, ("1", 2))
+
+    with pytest.raises(InvalidTypeError, match=r"^Point: coordinates must be int$"):
+        pickle.loads(pickle.dumps(Tampered()))
+
+
+def test_copies_are_the_object_itself(obj: ValueObject) -> None:
+    assert copy.copy(obj) is obj and copy.deepcopy(obj) is obj
+    holder = [obj, {"key": obj}]
+    cloned = copy.deepcopy(holder)
+    assert cloned is not holder and cloned[0] is obj and cloned[1]["key"] is obj  # type: ignore[index]

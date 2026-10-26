@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import operator
 from abc import ABCMeta
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 
 __all__ = [
     "CurrencyMismatchError",
@@ -76,12 +78,12 @@ class ValueObjectMeta(ABCMeta):
 
 
 class ValueObject(metaclass=ValueObjectMeta):
-    """Immutable, slotted object whose fields are written once, by its constructor.
+    """Immutable, slotted object, equal only to an object of the same concrete type with equal fields.
 
     Fields are the names in ``__slots__`` across the MRO, in declaration order; the constructor takes
     them positionally in that order. A slot ``_name`` is a private field exposed by a read-only
-    property ``name`` (Scalar's ``_value`` / ``value``). From this one convention, ``repr`` and
-    ``__match_args__`` are generic.
+    property ``name`` (Scalar's ``_value`` / ``value``). From this one convention, ``repr``, pickling,
+    equality, hashing, ordering and ``__match_args__`` are generic.
     """
 
     __slots__ = ()
@@ -109,6 +111,35 @@ class ValueObject(metaclass=ValueObjectMeta):
     def _astuple(self) -> tuple[Any, ...]:
         return tuple(getattr(self, name) for name in self._fields)
 
+    def _order_key(self) -> Any:
+        return self._astuple()
+
+    # equality, hashing and ordering: same concrete type only
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not type(self):
+            return NotImplemented
+        return self._astuple() == other._astuple()
+
+    def __hash__(self) -> int:
+        return hash((type(self), self._astuple()))
+
+    def _compare(self, other: object, op: Callable[[Any, Any], bool]) -> bool:
+        if type(other) is not type(self):
+            return NotImplemented  # type: ignore[no-any-return]
+        return op(self._order_key(), other._order_key())
+
+    def __lt__(self, other: object) -> bool:
+        return self._compare(other, operator.lt)
+
+    def __le__(self, other: object) -> bool:
+        return self._compare(other, operator.le)
+
+    def __gt__(self, other: object) -> bool:
+        return self._compare(other, operator.gt)
+
+    def __ge__(self, other: object) -> bool:
+        return self._compare(other, operator.ge)
+
     def __bool__(self) -> bool:
         return True  # never depends on the value: `if vo:` means `if vo is not None:`
 
@@ -118,6 +149,16 @@ class ValueObject(metaclass=ValueObjectMeta):
 
     def __delattr__(self, name: str) -> None:
         raise FrozenInstanceError(f"cannot delete {name!r}: {type(self).__name__} is immutable")
+
+    # copying and pickling: immutable, so copies are the object itself; unpickling re-validates
+    def __copy__(self) -> Self:
+        return self
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+        return self
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (type(self), self._astuple())
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({', '.join(map(repr, self._astuple()))})"
