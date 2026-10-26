@@ -108,6 +108,12 @@ def check_range(
 # ----------------------------------------------------------------------------------------------- ValueObject
 
 
+def _declared_slots(klass: type) -> tuple[str, ...]:
+    """The slot names a class declares itself. Python reads ``__slots__ = "name"`` as one slot, not four."""
+    slots = klass.__dict__.get("__slots__", ())
+    return (slots,) if isinstance(slots, str) else tuple(slots)
+
+
 class ValueObjectMeta(ABCMeta):
     """Gives every value-object class ``__slots__ = ()`` unless it declares its own slots,
     so no instance ever has a ``__dict__``. Subclasses ABCMeta, so VOs combine with ``abc.ABC``."""
@@ -136,7 +142,7 @@ class ValueObject(metaclass=ValueObjectMeta):
     def __init_subclass__(cls, *, abstract: bool = False, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         cls._abstract = abstract
-        slots = (name for klass in reversed(cls.__mro__) for name in klass.__dict__.get("__slots__", ()))
+        slots = (name for klass in reversed(cls.__mro__) for name in _declared_slots(klass))
         cls._fields = tuple(dict.fromkeys(name for name in slots if not name.startswith("__")))
         setattr(cls, "__match_args__", tuple(name.removeprefix("_") for name in cls._fields))  # noqa: B010
 

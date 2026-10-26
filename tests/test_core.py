@@ -248,6 +248,14 @@ class OrderId(Label):
     pass
 
 
+class Tag(ValueObject):
+    __slots__ = "name"  # a single string declares one slot
+    name: str
+
+    def __init__(self, name: str) -> None:
+        self._set(name=name)
+
+
 class Secret(ValueObject):
     """A private field `_token`, read through the property `token`."""
 
@@ -284,7 +292,8 @@ class Concrete(Base):
         pass
 
 
-VALUE_OBJECTS = [Point(1, 2), Point3(1, 2, 3), Label("a"), UserId("u"), OrderId("u"), Secret("s"), Version("1.10")]
+VALUE_OBJECTS = [Point(1, 2), Point3(1, 2, 3), Label("a"), UserId("u"), OrderId("u"), Tag("t"), Secret("s")]
+VALUE_OBJECTS += [Version("1.10")]
 
 
 @pytest.fixture(params=VALUE_OBJECTS, ids=repr)
@@ -332,12 +341,20 @@ def test_value_objects_combine_with_abc() -> None:
         (Point3, ("x", "y", "z"), ("x", "y", "z")),  # inherited fields first, in declaration order
         (UserId, ("text",), ("text",)),
         (Secret, ("_token",), ("token",)),  # a private slot is matched by its public name
+        (Tag, ("name",), ("name",)),  # regression (review of #40): a string __slots__ gave ('n', 'a', 'm', 'e')
     ],
 )
 def test_fields_and_match_args_come_from_the_slots(
     cls: type[ValueObject], fields: tuple[str, ...], match_args: tuple[str, ...]
 ) -> None:
     assert cls._fields == fields and cls.__match_args__ == match_args
+
+
+def test_a_string_slot_is_one_field() -> None:
+    """Review of #40: iterating `__slots__ = "name"` gave one field per character, so ==, hash and repr raised."""
+    tag = Tag("t")
+    assert tag == Tag("t") and tag != Tag("u") and hash(tag) == hash(Tag("t")) and repr(tag) == "Tag('t')"
+    assert tag.replace(name="u") == Tag("u") and pickle.loads(pickle.dumps(tag)) == tag
 
 
 def test_dunder_slots_are_not_fields() -> None:
@@ -423,6 +440,7 @@ def test_repr_lists_the_fields() -> None:
         "Label('a')",
         "UserId('u')",
         "OrderId('u')",
+        "Tag('t')",
         "Secret('s')",
         "Version('1.10')",
     ]
