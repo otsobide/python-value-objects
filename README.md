@@ -25,6 +25,7 @@ A collection of Value Objects to save time by generalizing types and format vali
     * [Nullable Negative Int](#nullable-negative-int)
     * [Negative or zero Int](#negative-or-zero-int)
     * [Nullable Negative or zero Int](#nullable-negative-or-zero-int)
+    * [Float](#float)
   * [String value-objects](#string-value-objects)
     * [String](#string)
     * [Nullable String](#nullable-string)
@@ -203,6 +204,25 @@ my_nullable_integer = NullableNegativeOrZeroInt(None)
 # Getting raw value
 my_integer.value() # returns -> -9
 my_nullable_integer.value() # returns -> None
+```
+
+### Float
+
+A basic float value object that ensures the value is a finite float. NaN and infinite values are rejected.
+
+```python
+from pyvalueobjects import Float
+
+# Creation
+my_float = Float(9.5)
+
+# Creating from int or str
+my_float_from_int = Float.from_int(9)
+my_float_from_str = Float.from_str('9.5')
+
+# Getting raw value
+my_float.value() # returns -> 9.5
+my_float_from_int.value() # returns -> 9.0
 ```
 
 ## String value-objects
