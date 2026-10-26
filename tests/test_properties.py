@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import math
+
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from pyvalueobjects._core import OutOfRangeError
-from pyvalueobjects.numeric import Int, PositiveInt
+from pyvalueobjects.numeric import Float, Int, PositiveInt
 
 
 @given(st.integers(), st.integers())
@@ -27,3 +30,14 @@ def test_positive_int_subtraction_raises_exactly_when_not_positive(a: int, b: in
         assert (PositiveInt(a) - PositiveInt(b)).value == a - b > 0
     except OutOfRangeError:
         assert a - b <= 0
+
+
+@given(st.floats(allow_nan=False, allow_infinity=False), st.floats(allow_nan=False, allow_infinity=False))
+def test_float_arithmetic_matches_python_or_leaves_the_finite_range(a: float, b: float) -> None:
+    for compute, expected in ((lambda: Float(a) + b, a + b), (lambda: Float(a) * Float(b), a * b)):
+        if math.isfinite(expected):
+            result = compute().value
+            assert result == expected and (result != 0 or math.copysign(1.0, result) == 1.0)  # never -0.0
+        else:
+            with pytest.raises(OutOfRangeError, match=f"^Float: must be finite, got {expected}$"):
+                compute()

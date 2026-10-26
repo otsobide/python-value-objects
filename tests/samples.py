@@ -40,6 +40,7 @@ class Level(enum.IntEnum):
 
 
 NOT_INT = ["1", None, True, 1.0, Decimal(1), [1]]
+NOT_FLOAT = ["1.5", None, True, Decimal(1), [1.0]]
 
 # Each family adds a Sample per value object in the commit that adds the value object (B3-B9).
 SAMPLES: list[Sample] = [
@@ -49,4 +50,15 @@ SAMPLES: list[Sample] = [
     Sample(numeric.PositiveInt, [1, 10**30], invalid=[0, -1], wrong_type=NOT_INT),
     Sample(numeric.NegativeOrZeroInt, [0, -5], invalid=[1], wrong_type=NOT_INT),
     Sample(numeric.NegativeInt, [-1, -(10**30)], invalid=[0, 1], wrong_type=NOT_INT),
+    Sample(
+        numeric.Float,
+        [0.0, -1.5, 1e300, 5e-324, 3],
+        invalid=[float("nan"), float("inf"), 10**400],
+        wrong_type=NOT_FLOAT,
+        normalized=[(3, "3.0"), (-0.0, "0.0"), (Level.HIGH, "3.0")],
+    ),
+    Sample(numeric.PositiveOrZeroFloat, [0.0, 2.5], invalid=[-0.1, float("inf")], wrong_type=NOT_FLOAT),
+    Sample(numeric.PositiveFloat, [0.1, 2.5], invalid=[0.0, -0.0, -1.0], wrong_type=NOT_FLOAT),
+    Sample(numeric.NegativeOrZeroFloat, [0.0, -2.5], invalid=[0.1], wrong_type=NOT_FLOAT),
+    Sample(numeric.NegativeFloat, [-0.1, -2.5], invalid=[0.0, -0.0], wrong_type=NOT_FLOAT),
 ]

@@ -8,7 +8,7 @@ from typing import assert_type
 
 from pyvalueobjects import Bounded, InvalidTypeError, Scalar, Sized, ValueObject, ValueObjectError
 from pyvalueobjects._core import binary_op, literal, unary_op
-from pyvalueobjects.numeric import Int, PositiveInt
+from pyvalueobjects.numeric import Float, Int, PositiveFloat, PositiveInt
 
 
 class Code(Scalar[str]):
@@ -85,8 +85,13 @@ assert_type(7 % Int(2), Int)
 assert_type(-Int(1), Int)
 assert_type(+PositiveInt(1), PositiveInt)
 assert_type(abs(Int(-1)), Int)
+assert_type(Float(1.5).value, float)
+assert_type(Float(1) / 2, Float)
+assert_type(2.5 * PositiveFloat(1.0), PositiveFloat)
+assert_type(float(Float(1.5)), float)
 match PositiveInt(5):
     case PositiveInt(number):
         assert_type(number, int)
 
 PositiveInt("5")  # type: ignore[arg-type]  # must stay rejected
+Float("1.5")  # type: ignore[arg-type]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import math
 import operator
 import sys
 from collections.abc import Callable
@@ -16,12 +17,24 @@ from hypothesis import strategies as st
 
 from pyvalueobjects import numeric
 from pyvalueobjects._core import Bounded, InvalidFormatError, InvalidTypeError, OutOfRangeError, show
-from pyvalueobjects.numeric import Int, NegativeInt, NegativeOrZeroInt, Numeric, PositiveInt, PositiveOrZeroInt
+from pyvalueobjects.numeric import (
+    Float,
+    Int,
+    NegativeFloat,
+    NegativeInt,
+    NegativeOrZeroFloat,
+    NegativeOrZeroInt,
+    Numeric,
+    PositiveFloat,
+    PositiveInt,
+    PositiveOrZeroFloat,
+    PositiveOrZeroInt,
+)
 
 # ------------------------------------------------------------------------------------------- shared tables
 
 # Each family root, with the suffix of its sign variants and the raw value it stores for an int.
-FAMILIES: dict[type[Numeric[Any]], tuple[str, Callable[[int], Any]]] = {Int: ("Int", int)}
+FAMILIES: dict[type[Numeric[Any]], tuple[str, Callable[[int], Any]]] = {Int: ("Int", int), Float: ("Float", float)}
 # (prefix of the sign variant, its parent's prefix, the bound attribute that rejects, its symbol, accepted signs)
 SIGNS = [
     ("PositiveOrZero", None, "ge", ">=", {0, 1}),
@@ -419,6 +432,159 @@ def test_without_a_digit_limit_every_int_is_accepted(int_digit_limit: int) -> No
     assert Int.from_str(str(Int(10**5000))) == Int(10**5000)
 
 
+# ------------------------------------------------------------------------------------------- Float: values and types
+
+NOT_FLOATS = [
+    ("1.5", "str"),
+    (True, "bool"),
+    (Decimal("1.5"), "Decimal"),
+    (None, "NoneType"),
+    (Fraction(1, 2), "Fraction"),
+]
+NOT_FLOATS += [(1j, "complex"), (b"1", "bytes"), ([1.0], "list"), (Digits.SEVEN, "Digits")]
+
+
+class Heavy(float):
+    def __float__(self) -> float:
+        return 99.0
+
+
+@pytest.mark.parametrize("cls", members(Float))
+@pytest.mark.parametrize(("raw", "kind"), NOT_FLOATS)
+def test_float_accepts_only_float_and_int(cls: type[Float], raw: Any, kind: str) -> None:
+    with pytest.raises(InvalidTypeError, match=f"^{cls.__name__}: expected float or int, got {kind}$"):
+        cls(raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
+        (3, 3.0),
+        (-7, -7.0),
+        (2**53, 2.0**53),
+        (-(2**53), -(2.0**53)),
+        (10**22, 1e22),
+        (Signal.UP, 1.0),
+        (Heavy(2.5), 2.5),
+    ],
+)
+def test_float_converts_ints_and_float_subclasses_to_a_plain_float(raw: Any, value: float) -> None:
+    number = Float(raw)
+    assert number.value == value and type(number.value) is float
+
+
+@pytest.mark.parametrize("cls", [Float, PositiveOrZeroFloat, NegativeOrZeroFloat])
+@pytest.mark.parametrize("raw", [-0.0, 0.0, 0])
+def test_negative_zero_becomes_zero(cls: type[Float], raw: float) -> None:
+    number = cls(raw)
+    assert math.copysign(1.0, number.value) == 1.0 and str(number) == "0.0" and number == cls(0.0)
+
+
+@pytest.mark.parametrize("cls", members(Float))
+@pytest.mark.parametrize("raw", [math.nan, math.inf, -math.inf])
+def test_float_must_be_finite_whatever_its_bounds(cls: type[Float], raw: float) -> None:
+    with pytest.raises(OutOfRangeError) as info:
+        cls(raw)
+    assert str(info.value) == f"{cls.__name__}: must be finite, got {raw}" and info.value.vo is cls
+
+
+@pytest.mark.parametrize(("raw", "shown"), [(10**400, show(10**400)), (-(10**400), show(-(10**400)))])
+def test_an_int_beyond_the_float_range_is_out_of_range(raw: int, shown: str) -> None:
+    with pytest.raises(OutOfRangeError) as info:
+        Float(raw)
+    assert str(info.value) == f"Float: too large for a float, got {shown}" and len(shown) == 80
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "expected"),
+    [
+        (Float, Int(3), Float(3.0)),
+        (Float, PositiveFloat(2.5), Float(2.5)),
+        (PositiveFloat, Float(2.5), PositiveFloat(2.5)),
+    ],
+)
+def test_another_number_converts_explicitly(cls: type[Numeric[Any]], raw: Numeric[Any], expected: Numeric[Any]) -> None:
+    assert cls(raw) == expected and type(cls(raw)) is cls
+
+
+def test_a_float_never_converts_to_an_int_implicitly() -> None:
+    with pytest.raises(InvalidTypeError, match=r"^Int: expected int, got float$"):
+        Int(Float(1.0))
+    for convert in (int, operator.index):
+        with pytest.raises(TypeError):
+            convert(Float(1.0))
+    assert float(Float(1.5)) == 1.5 and type(float(PositiveFloat(1.5))) is float
+
+
+@pytest.mark.parametrize(
+    ("number", "spec", "text"),
+    [
+        (Float(1234.5), "", "1234.5"),
+        (Float(1234.5), ",.2f", "1,234.50"),
+        (Float(0.25), ".0%", "25%"),
+        (Float(3), "", "3.0"),
+    ],
+)
+def test_float_formats_like_its_value(number: Float, spec: str, text: str) -> None:
+    assert format(number, spec) == text
+
+
+# ------------------------------------------------------------------------------------------- Float: text
+
+FLOAT_TEXTS = [
+    ("1.5", 1.5), ("-0.0", 0.0), ("+1", 1.0), ("1.", 1.0), (".5", 0.5), ("1e3", 1000.0), ("1E-3", 0.001),
+    (" 2.5 ", 2.5), ("\t007.50\n", 7.5), ("1e-400", 0.0), ("9007199254740993", 2.0**53),
+    ("1.7976931348623157e308", 1.7976931348623157e308), ("5e-324", 5e-324),
+]  # fmt: skip
+NOT_FLOAT_TEXTS = [
+    "", " ", ".", "-.", "e3", "1e", "1e3.5", "1 e3", "1.5.2", "1,5", "+-1", "--1", "0x1p3", "nan", "NaN", "inf", "-inf",
+    "Infinity", "1_0", "1_000.5", "١", "٣.٥", "５", "\xa01", "1\u2003", "1.5f",
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("text", "value"), FLOAT_TEXTS)
+def test_float_from_str_reads_a_decimal_literal(text: str, value: float) -> None:
+    number = Float.from_str(text)
+    assert number.value == value and math.copysign(1.0, number.value) == math.copysign(1.0, value)
+
+
+@pytest.mark.parametrize("cls", members(Float))
+@pytest.mark.parametrize("text", NOT_FLOAT_TEXTS)
+def test_float_from_str_rejects_everything_but_an_ascii_decimal_literal(cls: type[Float], text: str) -> None:
+    with pytest.raises(InvalidFormatError) as info:
+        cls.from_str(text)
+    assert str(info.value) == f"{cls.__name__}: cannot parse {show(text)}" and type(info.value.__cause__) is ValueError
+
+
+@pytest.mark.parametrize(
+    ("cls", "text", "message"),
+    [
+        (Float, "1e400", "Float: must be finite, got inf"),
+        (Float, "-1e400", "Float: must be finite, got -inf"),
+        (PositiveFloat, "0", "PositiveFloat: value must be > 0.0, got 0.0"),
+        (PositiveFloat, "-0.0", "PositiveFloat: value must be > 0.0, got 0.0"),
+        (NegativeFloat, "1e-400", "NegativeFloat: value must be < 0.0, got 0.0"),
+        (PositiveOrZeroFloat, "-0.1", "PositiveOrZeroFloat: value must be >= 0.0, got -0.1"),
+    ],
+)
+def test_float_from_str_applies_the_rules_of_the_class(cls: type[Float], text: str, message: str) -> None:
+    with pytest.raises(OutOfRangeError, match=f"^{message}$"):
+        cls.from_str(text)
+
+
+@pytest.mark.parametrize("text", ["1_000", "١٢", "５", "\xa012"])
+def test_regression_X02_float_from_str_reads_only_ascii_digits(text: str) -> None:
+    """X02 (#34): 0.x Float.from_str went through float(), which reads PEP 515 underscores and any Unicode digit."""
+    with pytest.raises(InvalidFormatError):
+        Float.from_str(text)
+    assert Float.from_str("1e3") == Float(1000.0)  # an exponent is part of a float literal
+
+
+@given(st.floats(allow_nan=False, allow_infinity=False))
+def test_float_text_round_trips(number: float) -> None:
+    assert Float.from_str(repr(number)) == Float(number) == Float.from_str(str(Float(number)))
+
+
 # ------------------------------------------------------------------------------------------- arithmetic
 
 
@@ -446,6 +612,17 @@ ARITHMETIC = [
     ("+NegativeInt(-3)", NegativeInt(-3)),
     ("Age(30) + 1", Age(31)),
     ("1 + Age(30)", Age(31)),
+    ("Float(1) / 4", Float(0.25)),
+    ("1 / Float(4)", Float(0.25)),
+    ("Float(1.5) + Float(2.5)", Float(4.0)),
+    ("Float(1.5) + 1", Float(2.5)),
+    ("3 - Float(0.5)", Float(2.5)),
+    ("2 * Float(1.5)", Float(3.0)),
+    ("Float(0.1) + 0.2", Float(0.30000000000000004)),
+    ("PositiveFloat(2.0) / PositiveFloat(4.0)", PositiveFloat(0.5)),
+    ("-Float(0.0)", Float(0.0)),
+    ("NegativeOrZeroFloat(-1.0) * 0", NegativeOrZeroFloat(0.0)),
+    ("abs(Float(-2.5))", Float(2.5)),
 ]
 # (expression, message): every result goes through the constructor of the left operand's type again
 REVALIDATED = [
@@ -458,6 +635,13 @@ REVALIDATED = [
     ("PositiveInt(1) // 2", "PositiveInt: value must be > 0, got 0"),
     ("PositiveInt(7) % 7", "PositiveInt: value must be > 0, got 0"),
     ("Age(150) + 1", "Age: value must be <= 150, got 151"),
+    ("Float(1e308) * 10", "Float: must be finite, got inf"),
+    ("Float(-1e308) - 1e308", "Float: must be finite, got -inf"),
+    ("Float(1.0) * 10**400", "Float: result out of range: int too large to convert to float"),
+    ("PositiveFloat(1.0) - 2", "PositiveFloat: value must be > 0.0, got -1.0"),
+    ("PositiveFloat(5e-324) / 2", "PositiveFloat: value must be > 0.0, got 0.0"),
+    ("NegativeFloat(-1.0) * 0", "NegativeFloat: value must be < 0.0, got 0.0"),
+    ("-PositiveFloat(0.5)", "PositiveFloat: value must be > 0.0, got -0.5"),
 ]
 # (left, symbol, right): a VO of another type, bool, or a raw type outside operand_types is never an operand
 NOT_OPERANDS = [
@@ -474,6 +658,16 @@ NOT_OPERANDS = [
     (Int(1), "//", Fraction(1)),
     (Int(1), "+", "1"),
     (Int(1), "-", None),
+    (Float(1), "+", Decimal(1)),
+    (Decimal(1), "*", Float(1)),
+    (Float(1), "+", Int(1)),
+    (Int(1), "+", Float(1)),
+    (Float(1), "-", PositiveFloat(1.0)),
+    (Float(1), "*", Fraction(1, 2)),
+    (Float(1), "+", True),
+    (Float(1), "/", "2"),
+    (Float(7), "//", 2),
+    (Float(7), "%", 2),
 ]
 
 
@@ -498,7 +692,11 @@ def test_other_operands_are_a_type_error(left: object, symbol: str, right: objec
     assert str(info.value) == message
 
 
-@pytest.mark.parametrize("expression", ["Int(1) // 0", "Int(1) % 0", "Int(1) // Int(0)", "1 // Int(0)", "1 % Int(0)"])
+DIVISIONS_BY_ZERO = ["Int(1) // 0", "Int(1) % 0", "Int(1) // Int(0)", "1 // Int(0)", "1 % Int(0)"]
+DIVISIONS_BY_ZERO += ["Float(1) / 0", "1 / Float(0.0)", "Float(1) / Float(0.0)", "Float(0.0) / 0.0"]
+
+
+@pytest.mark.parametrize("expression", DIVISIONS_BY_ZERO)
 def test_division_by_zero_propagates(expression: str) -> None:
     with pytest.raises(ZeroDivisionError):
         compute(expression)

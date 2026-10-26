@@ -1,24 +1,40 @@
-"""Numbers: the Int family, on the shared Numeric base."""
+"""Numbers: the Int and Float families, on the shared Numeric base."""
 
 from __future__ import annotations
 
+import math
 import operator
 import re
 import sys
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from pyvalueobjects._core import Bounded, OutOfRangeError, Scalar, T, binary_op, literal, show, unary_op
+from pyvalueobjects._core import (
+    Bounded,
+    OutOfRangeError,
+    Scalar,
+    T,
+    binary_op,
+    literal,
+    show,
+    unary_op,
+)
 
 __all__ = [
+    "Float",
     "Int",
+    "NegativeFloat",
     "NegativeInt",
+    "NegativeOrZeroFloat",
     "NegativeOrZeroInt",
     "Numeric",
+    "PositiveFloat",
     "PositiveInt",
+    "PositiveOrZeroFloat",
     "PositiveOrZeroInt",
 ]
 
 _INT_LITERAL = re.compile(r"[+-]?[0-9]+", re.ASCII)
+_DECIMAL_LITERAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", re.ASCII)
 
 # sys.set_int_max_str_digits() refuses limits under 640 digits, and an int of at most 2126 bits has at most 640.
 _ALWAYS_PRINTABLE_BITS = 2126
@@ -100,3 +116,52 @@ class NegativeOrZeroInt(Int):
 
 class NegativeInt(NegativeOrZeroInt):
     lt = 0
+
+
+# --------------------------------------------------------------------------------------------- floats
+
+
+class Float(Numeric[float]):
+    """Finite binary float; ``int`` input is converted, ``-0.0`` becomes ``0.0``."""
+
+    accepts = (float, int)
+    operand_types = (float, int)
+    _parse_str = staticmethod(literal(_DECIMAL_LITERAL, float))
+
+    if TYPE_CHECKING:
+
+        def __init__(self, value: float | Scalar[float]) -> None: ...
+
+    __truediv__, __rtruediv__ = binary_op(operator.truediv), binary_op(operator.truediv, reflected=True)
+
+    @classmethod
+    def _convert(cls, raw: float) -> float:
+        try:
+            return float(raw) + 0.0  # int -> float; -0.0 -> 0.0
+        except OverflowError:
+            raise OutOfRangeError(f"too large for a float, got {show(raw)}", vo=cls, value=raw) from None
+
+    @classmethod
+    def _validate(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise OutOfRangeError(f"must be finite, got {value}", vo=cls, value=value)
+        return super()._validate(value)
+
+    def __float__(self) -> float:
+        return self._value
+
+
+class PositiveOrZeroFloat(Float):
+    ge = 0.0
+
+
+class PositiveFloat(PositiveOrZeroFloat):
+    gt = 0.0
+
+
+class NegativeOrZeroFloat(Float):
+    le = 0.0
+
+
+class NegativeFloat(NegativeOrZeroFloat):
+    lt = 0.0
