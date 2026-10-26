@@ -60,6 +60,31 @@ class Digits(enum.StrEnum):
     SEVEN = "7"
 
 
+# User subclasses: the declarative knobs (bounds) and the cooperative _validate chain.
+
+
+class Age(Int):
+    ge = 0
+    le = 150
+
+
+class Quantity(PositiveInt):
+    pass
+
+
+class Even(Int):
+    @classmethod
+    def _validate(cls, value: int) -> int:
+        value = super()._validate(value)
+        if value % 2:
+            raise InvalidFormatError(f"must be even, got {value}", vo=cls, value=value)
+        return value
+
+
+class EvenPercent(Even, Age):
+    le = 100
+
+
 # ------------------------------------------------------------------------------------------- the shared base
 
 
@@ -317,29 +342,117 @@ def test_regression_X02_from_str_reads_only_ascii_digits(text: str) -> None:
     assert Int.from_str(" 12\n") == Int(12)
 
 
+# ------------------------------------------------------------------------------------------- arithmetic
+
+
+def compute(expression: str) -> Any:
+    """Evaluates one of the expressions below (our own literals) with this module's names."""
+    return eval(expression, globals())
+
+
+def operand_name(obj: object) -> str:
+    """The type name an operator TypeError shows: C types outside builtins carry their module."""
+    return {Decimal: "decimal.Decimal"}.get(type(obj), type(obj).__name__)
+
+
+# (expression, expected): the result has the left operand's concrete type, even with a raw number on the left
+ARITHMETIC = [
+    ("PositiveInt(3) + PositiveInt(2)", PositiveInt(5)),
+    ("PositiveInt(3) + 2", PositiveInt(5)),
+    ("2 + PositiveInt(3)", PositiveInt(5)),
+    ("Int(3) - 10", Int(-7)),
+    ("10 - PositiveInt(3)", PositiveInt(7)),
+    ("Int(-4) * Int(3)", Int(-12)),
+    ("3 * NegativeInt(-2)", NegativeInt(-6)),
+    ("Int(2**100) * Int(2**100)", Int(2**200)),
+    ("Int(7) // 2", Int(3)),
+    ("Int(-7) // 2", Int(-4)),
+    ("7 // Int(2)", Int(3)),
+    ("PositiveInt(7) // PositiveInt(2)", PositiveInt(3)),
+    ("Int(7) % 2", Int(1)),
+    ("Int(-7) % 3", Int(2)),
+    ("7 % Int(-4)", Int(-1)),
+    ("-Int(3)", Int(-3)),
+    ("-NegativeOrZeroInt(0)", NegativeOrZeroInt(0)),
+    ("abs(Int(-3))", Int(3)),
+    ("abs(PositiveOrZeroInt(0))", PositiveOrZeroInt(0)),
+    ("+NegativeInt(-3)", NegativeInt(-3)),
+    ("Age(30) + 1", Age(31)),
+    ("1 + Age(30)", Age(31)),
+]
+# (expression, message): every result goes through the constructor of the left operand's type again
+REVALIDATED = [
+    ("PositiveInt(1) - PositiveInt(5)", "PositiveInt: value must be > 0, got -4"),
+    ("PositiveInt(1) - 1", "PositiveInt: value must be > 0, got 0"),
+    ("0 - PositiveOrZeroInt(1)", "PositiveOrZeroInt: value must be >= 0, got -1"),
+    ("-PositiveInt(1)", "PositiveInt: value must be > 0, got -1"),
+    ("abs(NegativeInt(-3))", "NegativeInt: value must be < 0, got 3"),
+    ("NegativeInt(-2) * -1", "NegativeInt: value must be < 0, got 2"),
+    ("PositiveInt(1) // 2", "PositiveInt: value must be > 0, got 0"),
+    ("PositiveInt(7) % 7", "PositiveInt: value must be > 0, got 0"),
+    ("Age(150) + 1", "Age: value must be <= 150, got 151"),
+]
+# (left, symbol, right): a VO of another type, bool, or a raw type outside operand_types is never an operand
+NOT_OPERANDS = [
+    (Int(7), "/", 2),
+    (Int(7), "/", Int(2)),
+    (Int(1), "+", PositiveInt(2)),
+    (PositiveInt(1), "+", Int(2)),
+    (Int(1), "-", Age(2)),
+    (Int(1), "+", 1.5),
+    (1.5, "*", Int(1)),
+    (Int(1), "+", True),
+    (True, "+", Int(1)),
+    (Int(1), "%", Decimal(1)),
+    (Int(1), "//", Fraction(1)),
+    (Int(1), "+", "1"),
+    (Int(1), "-", None),
+]
+
+
+@pytest.mark.parametrize(("expression", "expected"), ARITHMETIC, ids=[row[0] for row in ARITHMETIC])
+def test_operators_build_the_left_operand_type(expression: str, expected: Numeric[Any]) -> None:
+    result = compute(expression)
+    assert result == expected and type(result) is type(expected) and type(result.value) is type(expected.value)
+
+
+@pytest.mark.parametrize(("expression", "message"), REVALIDATED, ids=[row[0] for row in REVALIDATED])
+def test_results_are_validated_again(expression: str, message: str) -> None:
+    with pytest.raises(OutOfRangeError) as info:
+        compute(expression)
+    assert str(info.value) == message
+
+
+@pytest.mark.parametrize(("left", "symbol", "right"), NOT_OPERANDS, ids=repr)
+def test_other_operands_are_a_type_error(left: object, symbol: str, right: object) -> None:
+    message = f"unsupported operand type(s) for {symbol}: '{operand_name(left)}' and '{operand_name(right)}'"
+    with pytest.raises(TypeError) as info:
+        eval(f"left {symbol} right", {"left": left, "right": right})
+    assert str(info.value) == message
+
+
+@pytest.mark.parametrize("expression", ["Int(1) // 0", "Int(1) % 0", "Int(1) // Int(0)", "1 // Int(0)", "1 % Int(0)"])
+def test_division_by_zero_propagates(expression: str) -> None:
+    with pytest.raises(ZeroDivisionError):
+        compute(expression)
+
+
+def test_unary_plus_is_the_number_itself() -> None:
+    number = PositiveInt(3)
+    assert +number is number
+
+
+def test_in_place_operators_rebind_and_never_mutate() -> None:
+    total = original = PositiveInt(1)
+    total += 2
+    total *= PositiveInt(3)
+    total -= 1
+    total //= 2
+    total %= 3
+    assert total == PositiveInt(1) and original == PositiveInt(1) and type(total) is PositiveInt
+
+
 # ------------------------------------------------------------------------------------------- extension
-
-
-class Age(Int):
-    ge = 0
-    le = 150
-
-
-class Quantity(PositiveInt):
-    pass
-
-
-class Even(Int):
-    @classmethod
-    def _validate(cls, value: int) -> int:
-        value = super()._validate(value)
-        if value % 2:
-            raise InvalidFormatError(f"must be even, got {value}", vo=cls, value=value)
-        return value
-
-
-class EvenPercent(Even, Age):
-    le = 100
 
 
 @pytest.mark.parametrize(
