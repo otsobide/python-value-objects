@@ -279,9 +279,17 @@ REPORT_TAG = "collection report: "
 COLLECT = f"""
 import decimal, fractions, json, sys  # loaded first, as by any library module that uses Decimal or Fraction
 import pytest
-code = pytest.main(["--collect-only", "-q", "-p", "no:cacheprovider"])
+
+class Report:
+    def pytest_collection_finish(self, session):
+        functions = [item for item in session.items if isinstance(item, pytest.Function)]
+        self.modules = sorted({{item.module.__name__ for item in functions}})
+
+report = Report()
+code = pytest.main(["--collect-only", "-q", "-p", "no:cacheprovider"], plugins=[report])
 import numbers
-print({REPORT_TAG!r} + json.dumps({{"numbers": numbers.__file__, "fraction": str(fractions.Fraction(1, 3) + 1)}}))
+fraction = str(fractions.Fraction(1, 3) + 1)
+print({REPORT_TAG!r} + json.dumps({{"numbers": numbers.__file__, "fraction": fraction, "modules": report.modules}}))
 sys.exit(code)
 """
 
@@ -455,10 +463,13 @@ def test_regression_C43_every_test_directory_is_a_package(directory: str) -> Non
         assert (ROOT / package / "__init__.py").is_file(), f"{package} is not a package"
 
 
-def test_regression_C43_test_modules_are_imported_under_the_tests_package(request: pytest.FixtureRequest) -> None:
-    names = {item.module.__name__ for item in request.session.items if isinstance(item, pytest.Function)}
-    assert names
-    assert sorted(name for name in names if not name.startswith("tests.")) == []
+def test_regression_C43_test_modules_are_imported_under_the_tests_package(collection: list[str]) -> None:
+    """C43 (#32): unittest discovery imported tests/numbers/int_test.py as `numbers.int_test`.
+
+    The names come from the full collection run, not from this session, which a `-k` or a single file narrows.
+    """
+    expected = sorted(path.removesuffix(".py").replace("/", ".") for path in TEST_MODULES)
+    assert collection_report(collection)["modules"] == expected
 
 
 def test_regression_C43_collection_keeps_the_stdlib_numbers_module(collection: list[str]) -> None:
@@ -480,8 +491,8 @@ def test_regression_C43_collection_keeps_the_stdlib_numbers_module(collection: l
 )
 def test_regression_C43_collection_report_keeps_paths_with_spaces(path: str) -> None:
     """The report was one space-separated line, so a stdlib path with a space was cut (#39 review)."""
-    lines = ["tests/test_project.py::test_x", REPORT_TAG + json.dumps({"numbers": path, "fraction": "4/3"})]
-    assert collection_report(lines) == {"numbers": path, "fraction": "4/3"}
+    report = {"numbers": path, "fraction": "4/3", "modules": ["tests.test_project"]}
+    assert collection_report(["tests/test_project.py::test_x", REPORT_TAG + json.dumps(report)]) == report
 
 
 # ------------------------------------------------------------------------------------------- lint and type checks
