@@ -4,11 +4,12 @@ import operator
 import re
 from collections.abc import Callable
 from datetime import date
+from decimal import Decimal
 from typing import assert_type
 
 from pyvalueobjects import Bounded, InvalidTypeError, Scalar, Sized, ValueObject, ValueObjectError
 from pyvalueobjects._core import binary_op, literal, unary_op
-from pyvalueobjects.numeric import Float, Int, PositiveFloat, PositiveInt
+from pyvalueobjects.numeric import DecimalNumber, Float, Int, PositiveDecimal, PositiveFloat, PositiveInt
 
 
 class Code(Scalar[str]):
@@ -89,9 +90,14 @@ assert_type(Float(1.5).value, float)
 assert_type(Float(1) / 2, Float)
 assert_type(2.5 * PositiveFloat(1.0), PositiveFloat)
 assert_type(float(Float(1.5)), float)
+assert_type(DecimalNumber("1.5").value, Decimal)
+assert_type(DecimalNumber(1) / 3, DecimalNumber)
+assert_type(Decimal("0.5") * PositiveDecimal(2), PositiveDecimal)
+assert_type(-DecimalNumber("1.5"), DecimalNumber)
 match PositiveInt(5):
     case PositiveInt(number):
         assert_type(number, int)
 
 PositiveInt("5")  # type: ignore[arg-type]  # must stay rejected
 Float("1.5")  # type: ignore[arg-type]
+DecimalNumber(1.5)  # type: ignore[arg-type]

@@ -1,4 +1,4 @@
-"""Numbers: the Int and Float families, on the shared Numeric base."""
+"""Numbers: the Int, Float and DecimalNumber families, on the shared Numeric base."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import math
 import operator
 import re
 import sys
+from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from pyvalueobjects._core import (
@@ -21,18 +22,27 @@ from pyvalueobjects._core import (
 )
 
 __all__ = [
+    "DECIMAL_CONTEXT",
+    "DecimalNumber",
     "Float",
     "Int",
+    "NegativeDecimal",
     "NegativeFloat",
     "NegativeInt",
+    "NegativeOrZeroDecimal",
     "NegativeOrZeroFloat",
     "NegativeOrZeroInt",
     "Numeric",
+    "PositiveDecimal",
     "PositiveFloat",
     "PositiveInt",
+    "PositiveOrZeroDecimal",
     "PositiveOrZeroFloat",
     "PositiveOrZeroInt",
 ]
+
+DECIMAL_CONTEXT = Context(prec=34, rounding=ROUND_HALF_EVEN, traps=[InvalidOperation, DivisionByZero, Overflow])
+"""Every Decimal operation of the library runs here (IEEE 754 decimal128), never in the caller's context."""
 
 _INT_LITERAL = re.compile(r"[+-]?[0-9]+", re.ASCII)
 _DECIMAL_LITERAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", re.ASCII)
@@ -169,3 +179,68 @@ class NegativeOrZeroFloat(Float):
 
 class NegativeFloat(NegativeOrZeroFloat):
     lt = 0.0
+
+
+# --------------------------------------------------------------------------------------------- decimals
+
+
+def _decimal(text: str) -> Decimal:
+    """The exact Decimal of a literal. The context only decides that an out-of-range exponent raises, not gives NaN."""
+    return Decimal(text, DECIMAL_CONTEXT)
+
+
+def _divide(dividend: Decimal | int, divisor: Decimal | int) -> Decimal:
+    """DECIMAL_CONTEXT.divide, except that 0 / 0 raises ZeroDivisionError, as x / 0 does, not InvalidOperation."""
+    if not divisor:
+        raise ZeroDivisionError("division by zero")
+    return DECIMAL_CONTEXT.divide(dividend, divisor)
+
+
+class DecimalNumber(Numeric[Decimal]):
+    """Exact finite decimal. Never accepts a float.
+
+    Arithmetic runs in DECIMAL_CONTEXT, whatever the caller's context. ``-0`` becomes ``0``; the scale is kept
+    (``'1.10'`` prints as given and equals ``'1.1'``).
+    """
+
+    accepts = (Decimal, int, str)
+    operand_types = (Decimal, int)
+    _parse_decimal: ClassVar[staticmethod[[str], Decimal]] = staticmethod(literal(_DECIMAL_LITERAL, _decimal))
+
+    if TYPE_CHECKING:
+
+        def __init__(self, value: Decimal | int | str | Scalar[Decimal]) -> None: ...
+
+    __add__, __radd__ = binary_op(DECIMAL_CONTEXT.add), binary_op(DECIMAL_CONTEXT.add, reflected=True)
+    __sub__, __rsub__ = binary_op(DECIMAL_CONTEXT.subtract), binary_op(DECIMAL_CONTEXT.subtract, reflected=True)
+    __mul__, __rmul__ = binary_op(DECIMAL_CONTEXT.multiply), binary_op(DECIMAL_CONTEXT.multiply, reflected=True)
+    __truediv__, __rtruediv__ = binary_op(_divide), binary_op(_divide, reflected=True)
+    __neg__, __abs__ = unary_op(Decimal.copy_negate), unary_op(Decimal.copy_abs)  # exact, context-free
+
+    @classmethod
+    def _convert(cls, raw: Decimal | int | str) -> Decimal:
+        return cls._parse_decimal(raw) if isinstance(raw, str) else Decimal(raw)
+
+    @classmethod
+    def _validate(cls, value: Decimal) -> Decimal:
+        if not value.is_finite():
+            raise OutOfRangeError(f"must be finite, got {value}", vo=cls, value=value)
+        if value.is_zero():
+            value = value.copy_abs()  # no '-0'
+        return super()._validate(value)
+
+
+class PositiveOrZeroDecimal(DecimalNumber):
+    ge = 0
+
+
+class PositiveDecimal(PositiveOrZeroDecimal):
+    gt = 0
+
+
+class NegativeOrZeroDecimal(DecimalNumber):
+    le = 0
+
+
+class NegativeDecimal(NegativeOrZeroDecimal):
+    lt = 0

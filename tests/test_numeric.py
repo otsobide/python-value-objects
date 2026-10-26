@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import decimal
 import enum
 import math
 import operator
 import sys
 from collections.abc import Callable
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal, DivisionByZero, InvalidOperation, Overflow
 from fractions import Fraction
 from typing import Any
 
@@ -18,15 +19,21 @@ from hypothesis import strategies as st
 from pyvalueobjects import numeric
 from pyvalueobjects._core import Bounded, InvalidFormatError, InvalidTypeError, OutOfRangeError, PrecisionError, show
 from pyvalueobjects.numeric import (
+    DECIMAL_CONTEXT,
+    DecimalNumber,
     Float,
     Int,
+    NegativeDecimal,
     NegativeFloat,
     NegativeInt,
+    NegativeOrZeroDecimal,
     NegativeOrZeroFloat,
     NegativeOrZeroInt,
     Numeric,
+    PositiveDecimal,
     PositiveFloat,
     PositiveInt,
+    PositiveOrZeroDecimal,
     PositiveOrZeroFloat,
     PositiveOrZeroInt,
 )
@@ -34,7 +41,11 @@ from pyvalueobjects.numeric import (
 # ------------------------------------------------------------------------------------------- shared tables
 
 # Each family root, with the suffix of its sign variants and the raw value it stores for an int.
-FAMILIES: dict[type[Numeric[Any]], tuple[str, Callable[[int], Any]]] = {Int: ("Int", int), Float: ("Float", float)}
+FAMILIES: dict[type[Numeric[Any]], tuple[str, Callable[[int], Any]]] = {
+    Int: ("Int", int),
+    Float: ("Float", float),
+    DecimalNumber: ("Decimal", Decimal),
+}
 # (prefix of the sign variant, its parent's prefix, the bound attribute that rejects, its symbol, accepted signs)
 SIGNS = [
     ("PositiveOrZero", None, "ge", ">=", {0, 1}),
@@ -82,6 +93,10 @@ class Signal(enum.IntEnum):
 
 class Digits(enum.StrEnum):
     SEVEN = "7"
+
+
+class Thrifty(Decimal):
+    """A Decimal subclass: not a Decimal for the type gate, which only converts int, float and str subclasses."""
 
 
 # User subclasses: the declarative knobs (bounds) and the cooperative _validate chain.
@@ -605,6 +620,114 @@ def test_float_text_round_trips(number: float) -> None:
     assert Float.from_str(repr(number)) == Float(number) == Float.from_str(str(Float(number)))
 
 
+# ------------------------------------------------------------------------------------------- DecimalNumber: values and types
+
+NOT_DECIMALS = [(1.5, "float"), (True, "bool"), (None, "NoneType"), (b"1", "bytes"), ([1], "list"), (1j, "complex")]
+NOT_DECIMALS += [(Fraction(1, 2), "Fraction"), (Float(1.5), "float"), (Thrifty("1.5"), "Thrifty")]
+
+
+def test_decimal_context_is_decimal128_and_traps_what_would_lose_meaning() -> None:
+    assert (DECIMAL_CONTEXT.prec, DECIMAL_CONTEXT.rounding) == (34, ROUND_HALF_EVEN)
+    assert (DECIMAL_CONTEXT.Emax, DECIMAL_CONTEXT.Emin) == (999999, -999999)
+    assert {signal for signal, on in DECIMAL_CONTEXT.traps.items() if on} == {
+        InvalidOperation,
+        DivisionByZero,
+        Overflow,
+    }
+
+
+@pytest.mark.parametrize("cls", members(DecimalNumber))
+@pytest.mark.parametrize(("raw", "kind"), NOT_DECIMALS)
+def test_decimal_never_accepts_a_float(cls: type[DecimalNumber], raw: Any, kind: str) -> None:
+    with pytest.raises(InvalidTypeError, match=f"^{cls.__name__}: expected Decimal or int or str, got {kind}$"):
+        cls(raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "text"),
+    [
+        (Decimal("1.50"), "1.50"), (7, "7"), (-(2**100), str(-(2**100))), ("1.50", "1.50"), (" 4.10 ", "4.10"),
+        ("+1", "1"), ("1.", "1"), (".5", "0.5"), ("1e3", "1E+3"), ("1E-3", "0.001"), ("-0.00", "0.00"),
+        (Decimal("-0"), "0"), (Decimal("-0E+3"), "0E+3"), (Signal.UP, "1"), (Digits.SEVEN, "7"), (Int(5), "5"),
+        ("123.456789012345678901234567890", "123.456789012345678901234567890"), (10**40, "1" + "0" * 40),
+    ],
+)  # fmt: skip
+def test_decimal_keeps_the_exact_value_and_scale(raw: Any, text: str) -> None:
+    number = DecimalNumber(raw)
+    assert str(number) == text and type(number.value) is Decimal and number.value == Decimal(text)
+    assert not number.value.is_signed() or number.value != 0  # never '-0'
+
+
+def test_decimals_with_another_scale_are_equal() -> None:
+    assert DecimalNumber("1.10") == DecimalNumber("1.1") == DecimalNumber(Decimal("1.100"))
+    assert hash(DecimalNumber("1.10")) == hash(DecimalNumber("1.1")) and str(DecimalNumber("1.10")) == "1.10"
+
+
+NOT_DECIMAL_TEXTS = [
+    "", " ", ".", "-.", "e3", "1e", "1e3.5", "1.5.2", "1,5", "1 000", "+-1", "0x10", "1_000", "١٢", "５", "\xa01",
+    "NaN", "nan", "sNaN", "Infinity", "-Infinity", "inf", "1e99999999999999999999",
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("cls", members(DecimalNumber))
+@pytest.mark.parametrize("text", NOT_DECIMAL_TEXTS)
+def test_decimal_text_must_be_an_ascii_decimal_literal(cls: type[DecimalNumber], text: str) -> None:
+    for build in (cls, cls.from_str):
+        with pytest.raises(InvalidFormatError) as info:
+            build(text)
+        assert str(info.value) == f"{cls.__name__}: cannot parse {show(text)}"
+
+
+@pytest.mark.parametrize("context", [decimal.Context(), decimal.Context(traps=[])], ids=["trapping", "quiet"])
+def test_decimal_parsing_ignores_the_caller_context(context: decimal.Context) -> None:
+    """Decimal(text) in a quiet context gives NaN for an exponent beyond any range, and a trapping one raises."""
+    with decimal.localcontext(context):
+        with pytest.raises(InvalidFormatError, match=r"^DecimalNumber: cannot parse '1e99999999999999999999'$"):
+            DecimalNumber("1e99999999999999999999")
+        assert DecimalNumber("3.14159265358979323846").value == Decimal("3.14159265358979323846")
+
+
+@pytest.mark.parametrize("cls", members(DecimalNumber))
+@pytest.mark.parametrize("raw", [Decimal("NaN"), Decimal("sNaN"), Decimal("Infinity"), Decimal("-Infinity")])
+def test_decimal_must_be_finite_whatever_its_bounds(cls: type[DecimalNumber], raw: Decimal) -> None:
+    with pytest.raises(OutOfRangeError, match=f"^{cls.__name__}: must be finite, got {raw}$"):
+        cls(raw)
+
+
+@pytest.mark.parametrize(
+    ("cls", "raw", "expected"),
+    [
+        (DecimalNumber, PositiveDecimal("1.5"), DecimalNumber("1.5")),
+        (PositiveDecimal, DecimalNumber(2), PositiveDecimal(2)),
+    ],
+)
+def test_another_decimal_converts_explicitly(
+    cls: type[DecimalNumber], raw: DecimalNumber, expected: DecimalNumber
+) -> None:
+    assert cls(raw) == expected and type(cls(raw)) is cls
+
+
+@pytest.mark.parametrize(
+    ("cls", "text", "message"),
+    [
+        (PositiveDecimal, "0", "PositiveDecimal: value must be > 0, got Decimal('0')"),
+        (PositiveDecimal, "-0.00", "PositiveDecimal: value must be > 0, got Decimal('0.00')"),
+        (NegativeDecimal, " 1e-30 ", "NegativeDecimal: value must be < 0, got Decimal('1E-30')"),
+        (PositiveOrZeroDecimal, "-0.01", "PositiveOrZeroDecimal: value must be >= 0, got Decimal('-0.01')"),
+    ],
+)
+def test_decimal_from_str_applies_the_bounds_of_the_class(cls: type[DecimalNumber], text: str, message: str) -> None:
+    with pytest.raises(OutOfRangeError) as info:
+        cls.from_str(text)
+    assert str(info.value) == message
+
+
+@given(st.decimals(allow_nan=False, allow_infinity=False, places=8, min_value=-(10**20), max_value=10**20))
+def test_decimal_text_round_trips(number: Decimal) -> None:
+    built = DecimalNumber(number)
+    assert DecimalNumber.from_str(str(built)) == built and str(DecimalNumber(str(built))) == str(built)
+
+
 # ------------------------------------------------------------------------------------------- arithmetic
 
 
@@ -643,6 +766,29 @@ ARITHMETIC = [
     ("-Float(0.0)", Float(0.0)),
     ("NegativeOrZeroFloat(-1.0) * 0", NegativeOrZeroFloat(0.0)),
     ("abs(Float(-2.5))", Float(2.5)),
+    ("DecimalNumber('0.1') + Decimal('0.2')", DecimalNumber("0.3")),
+    ("Decimal('0.2') + DecimalNumber('0.1')", DecimalNumber("0.3")),
+    ("DecimalNumber('0.1') + DecimalNumber('0.2')", DecimalNumber("0.3")),
+    ("1 + DecimalNumber('0.5')", DecimalNumber("1.5")),
+    ("3 - DecimalNumber('1')", DecimalNumber(2)),
+    ("PositiveDecimal('0.5') * PositiveDecimal('0.5')", PositiveDecimal("0.25")),
+    ("1 / DecimalNumber(4)", DecimalNumber("0.25")),
+    ("-NegativeOrZeroDecimal(0)", NegativeOrZeroDecimal(0)),
+    ("abs(DecimalNumber('-2.5'))", DecimalNumber("2.5")),
+]
+# (expression, str() of the result): exact digits and scale, computed in DECIMAL_CONTEXT under the hostile context
+DECIMAL_RESULTS = [
+    ("DecimalNumber('1.50') + Decimal('0.20')", "1.70"),
+    ("DecimalNumber('1.5') * 2", "3.0"),
+    ("DecimalNumber('123.456') * Decimal('1000')", "123456.000"),
+    ("DecimalNumber(1) / 3", "0.3333333333333333333333333333333333"),
+    ("DecimalNumber(2) / 3", "0.6666666666666666666666666666666667"),
+    ("DecimalNumber('9999999999999999999999999999999999') + 1", "1.000000000000000000000000000000000E+34"),
+    ("DecimalNumber('1') - Decimal('1.00')", "0.00"),
+    ("-DecimalNumber('1.50')", "-1.50"),
+    ("-DecimalNumber('0.00')", "0.00"),
+    ("abs(DecimalNumber('-0.010'))", "0.010"),
+    ("DecimalNumber('1E+999999') - DecimalNumber('1E+999999')", "0E+999999"),
 ]
 # (expression, message): every result goes through the constructor of the left operand's type again
 REVALIDATED = [
@@ -662,6 +808,11 @@ REVALIDATED = [
     ("PositiveFloat(5e-324) / 2", "PositiveFloat: value must be > 0.0, got 0.0"),
     ("NegativeFloat(-1.0) * 0", "NegativeFloat: value must be < 0.0, got 0.0"),
     ("-PositiveFloat(0.5)", "PositiveFloat: value must be > 0.0, got -0.5"),
+    ("PositiveDecimal('1') - 2", "PositiveDecimal: value must be > 0, got Decimal('-1')"),
+    ("-PositiveDecimal('0.5')", "PositiveDecimal: value must be > 0, got Decimal('-0.5')"),
+    ("NegativeDecimal('-1') * 0", "NegativeDecimal: value must be < 0, got Decimal('0')"),
+    ("DecimalNumber('9E+999999') * 10", "DecimalNumber: result out of range: decimal overflow"),
+    ("10 * DecimalNumber('-9E+999999')", "DecimalNumber: result out of range: decimal overflow"),
 ]
 # (left, symbol, right): a VO of another type, bool, or a raw type outside operand_types is never an operand
 NOT_OPERANDS = [
@@ -688,6 +839,16 @@ NOT_OPERANDS = [
     (Float(1), "/", "2"),
     (Float(7), "//", 2),
     (Float(7), "%", 2),
+    (DecimalNumber(1), "+", 0.1),
+    (0.1, "+", DecimalNumber(1)),
+    (DecimalNumber(1), "*", Float(1)),
+    (DecimalNumber(1), "+", Int(1)),
+    (DecimalNumber(1), "-", PositiveDecimal(1)),
+    (DecimalNumber(1), "+", True),
+    (DecimalNumber(1), "*", Fraction(1, 2)),
+    (DecimalNumber(1), "/", "2"),
+    (DecimalNumber(7), "//", 2),
+    (DecimalNumber(7), "%", 2),
 ]
 
 
@@ -695,6 +856,12 @@ NOT_OPERANDS = [
 def test_operators_build_the_left_operand_type(expression: str, expected: Numeric[Any]) -> None:
     result = compute(expression)
     assert result == expected and type(result) is type(expected) and type(result.value) is type(expected.value)
+
+
+@pytest.mark.parametrize(("expression", "text"), DECIMAL_RESULTS, ids=[row[0] for row in DECIMAL_RESULTS])
+def test_decimal_arithmetic_runs_in_the_decimal_context(expression: str, text: str) -> None:
+    """The autouse hostile context (3 digits, ROUND_FLOOR) gives other digits to anything computed in it."""
+    assert str(compute(expression)) == text
 
 
 @pytest.mark.parametrize(("expression", "message"), REVALIDATED, ids=[row[0] for row in REVALIDATED])
@@ -714,10 +881,13 @@ def test_other_operands_are_a_type_error(left: object, symbol: str, right: objec
 
 DIVISIONS_BY_ZERO = ["Int(1) // 0", "Int(1) % 0", "Int(1) // Int(0)", "1 // Int(0)", "1 % Int(0)"]
 DIVISIONS_BY_ZERO += ["Float(1) / 0", "1 / Float(0.0)", "Float(1) / Float(0.0)", "Float(0.0) / 0.0"]
+DIVISIONS_BY_ZERO += ["DecimalNumber(1) / 0", "DecimalNumber(1) / DecimalNumber(0)", "1 / DecimalNumber(0)"]
+DIVISIONS_BY_ZERO += ["DecimalNumber(0) / 0", "DecimalNumber('0.00') / Decimal('-0')", "Decimal(0) / DecimalNumber(0)"]
 
 
 @pytest.mark.parametrize("expression", DIVISIONS_BY_ZERO)
 def test_division_by_zero_propagates(expression: str) -> None:
+    """0 / 0 included: DECIMAL_CONTEXT calls it InvalidOperation, which is not a ZeroDivisionError."""
     with pytest.raises(ZeroDivisionError):
         compute(expression)
 

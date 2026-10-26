@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import decimal
 import math
+from decimal import Decimal
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from pyvalueobjects._core import OutOfRangeError
-from pyvalueobjects.numeric import Float, Int, PositiveInt
+from pyvalueobjects.numeric import DecimalNumber, Float, Int, PositiveInt
 
 
 @given(st.integers(), st.integers())
@@ -41,3 +43,14 @@ def test_float_arithmetic_matches_python_or_leaves_the_finite_range(a: float, b:
         else:
             with pytest.raises(OutOfRangeError, match=f"^Float: must be finite, got {expected}$"):
                 compute()
+
+
+EXACT = decimal.Context(prec=100)
+SMALL_DECIMALS = st.decimals(-(10**9), 10**9, allow_nan=False, allow_infinity=False, places=6)
+
+
+@given(SMALL_DECIMALS, SMALL_DECIMALS)
+def test_decimal_arithmetic_is_exact_within_34_digits(a: Decimal, b: Decimal) -> None:
+    assert (DecimalNumber(a) + b).value == EXACT.add(a, b) and (a - DecimalNumber(b)).value == EXACT.subtract(a, b)
+    assert (DecimalNumber(a) * DecimalNumber(b)).value == EXACT.multiply(a, b)
+    assert (-DecimalNumber(a)).value == a.copy_negate()  # equal for zero too: 0 == -0

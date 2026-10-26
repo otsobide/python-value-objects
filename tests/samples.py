@@ -41,6 +41,7 @@ class Level(enum.IntEnum):
 
 NOT_INT = ["1", None, True, 1.0, Decimal(1), [1]]
 NOT_FLOAT = ["1.5", None, True, Decimal(1), [1.0]]
+NOT_DECIMAL = [1.5, None, True, b"1", [1]]
 
 # Each family adds a Sample per value object in the commit that adds the value object (B3-B9).
 SAMPLES: list[Sample] = [
@@ -61,4 +62,15 @@ SAMPLES: list[Sample] = [
     Sample(numeric.PositiveFloat, [0.1, 2.5], invalid=[0.0, -0.0, -1.0], wrong_type=NOT_FLOAT),
     Sample(numeric.NegativeOrZeroFloat, [0.0, -2.5], invalid=[0.1], wrong_type=NOT_FLOAT),
     Sample(numeric.NegativeFloat, [-0.1, -2.5], invalid=[0.0, -0.0], wrong_type=NOT_FLOAT),
+    Sample(
+        numeric.DecimalNumber,
+        ["1.50", -3, Decimal("1e-30"), 2**100, "9" * 34],
+        invalid=["1_000", "١٢", "NaN", "sNaN", "Infinity", "1,5", "", Decimal("NaN")],
+        wrong_type=NOT_DECIMAL,
+        normalized=[(" 4.10 ", "4.10"), ("-0.00", "0.00"), (Decimal("-0"), "0"), ("1e3", "1E+3"), (Level.HIGH, "3")],
+    ),
+    Sample(numeric.PositiveOrZeroDecimal, ["0", "1.5"], invalid=["-0.01"], wrong_type=NOT_DECIMAL),
+    Sample(numeric.PositiveDecimal, ["0.01", 7], invalid=["0", "-0", "-1"], wrong_type=NOT_DECIMAL),
+    Sample(numeric.NegativeOrZeroDecimal, ["0", "-1.5"], invalid=["0.01"], wrong_type=NOT_DECIMAL),
+    Sample(numeric.NegativeDecimal, ["-0.01", -7], invalid=["0", "-0.00", "1"], wrong_type=NOT_DECIMAL),
 ]
