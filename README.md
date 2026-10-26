@@ -398,6 +398,10 @@ my_int_array = ArrayList(Int)([39])
 
 # Getting raw value
 my_int_array.value()  # returns -> [39]
+
+# Comparing types (classes are cached per element type)
+ArrayList(Int) is ArrayList(Int)  # returns -> True
+isinstance(my_int_array, ArrayList(Int))  # returns -> True
 ```
 
 ### Nullable ArrayList
