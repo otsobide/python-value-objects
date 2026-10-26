@@ -635,3 +635,72 @@ def test_readme_badges_point_at_existing_workflows(link: str) -> None:
 def test_readme_shows_the_ci_status_badge() -> None:
     badge = f"https://github.com/{REPOSITORY}/actions/workflows/tests.yml/badge.svg"
     assert f"[![Tests]({badge})](https://github.com/{REPOSITORY}/actions/workflows/tests.yml)" in README
+
+
+# ------------------------------------------------------------------------------------------- contributor docs
+
+AGENTS = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+AGENTS_CODE = "\n".join(re.findall(r"```.*?```|`[^`\n]+`", AGENTS, re.DOTALL))
+AGENTS_PATHS = sorted(
+    set(re.findall(r"`((?:\.github|pyvalueobjects|tests)/[^`\s<>*]*|[\w.-]+\.(?:toml|lock|md))`", AGENTS))
+)
+PYTEST_INI = PYPROJECT["tool"]["pytest"]["ini_options"]
+
+
+def test_regression_C55_agents_md_does_not_claim_pytest_misses_the_tests() -> None:
+    """C55 (#32): AGENTS.md said default pytest discovery won't find the *_test.py modules."""
+    claim = r"[^.\n]*pytest[^.\n]*(?:won't|will not|does not|doesn't|cannot|can't) find[^.\n]*"
+    assert re.findall(claim, AGENTS) == []
+
+
+def test_regression_C55_default_pytest_discovery_finds_every_test_module(tmp_path: Path) -> None:
+    """An empty config gives pytest's defaults, which already collect both test_*.py and *_test.py."""
+    ini = tmp_path / "pytest.ini"
+    ini.write_text("[pytest]\n", encoding="utf-8")
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "-c", str(ini), "--rootdir", str(ROOT), "--collect-only", "-q", "tests"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    assert set(TEST_MODULES) <= {line.split("::")[0] for line in run.stdout.splitlines() if "::" in line}
+
+
+@pytest.mark.parametrize("pattern", PYTEST_INI.get("python_files", ["test_*.py"]))
+def test_agents_md_documents_each_test_file_pattern(pattern: str) -> None:
+    assert f"`{pattern}`" in AGENTS
+
+
+@pytest.mark.parametrize("target", sorted(set(make_calls(AGENTS_CODE))))
+def test_agents_md_only_mentions_existing_make_targets(target: str) -> None:
+    assert target in MAKE_TARGETS
+
+
+@pytest.mark.parametrize("target", sorted(set(MAKE_TARGETS) - {"publish"}))  # publishing is for maintainers
+def test_agents_md_documents_every_make_target(target: str) -> None:
+    assert f"make {target}" in AGENTS_CODE
+
+
+@pytest.mark.parametrize("selector", sorted(set(re.findall(r"^uv run pytest (\S+)", AGENTS, re.MULTILINE))))
+def test_agents_md_pytest_examples_select_existing_tests(selector: str) -> None:
+    path, _, name = selector.partition("::")
+    assert (ROOT / path).is_file()
+    assert not name or re.search(rf"^def {name}\(", (ROOT / path).read_text(encoding="utf-8"), re.MULTILINE)
+
+
+@pytest.mark.parametrize("path", AGENTS_PATHS)
+def test_agents_md_only_mentions_existing_paths(path: str) -> None:
+    assert (ROOT / path).exists()
+
+
+def test_agents_md_states_the_supported_python_range() -> None:
+    (major, first), *_, (_, last) = classifier_versions()
+    assert f"Python {major}.{first}–{major}.{last}" in AGENTS
+    assert f"stay {major}.{first}-compatible" in AGENTS
+
+
+@pytest.mark.parametrize("stale", ["setup.cfg", "requirements.txt", "3.9", "unittest discover -s ./tests"])
+def test_agents_md_does_not_mention_the_old_tooling(stale: str) -> None:
+    assert stale not in AGENTS

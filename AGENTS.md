@@ -4,19 +4,29 @@ This file provides guidance to AI coding agents working with code in this reposi
 
 ## Project
 
-`pyvalueobjects` is a dependency-free Python library of validated value objects, published to PyPI. Packaging metadata and the version live in `setup.cfg` (`pyproject.toml` only declares the setuptools build backend). The primary repository is on Codeberg; GitHub is a mirror.
+`pyvalueobjects` is a dependency-free Python library of validated value objects, published to PyPI. Packaging metadata and the version live only in `pyproject.toml` (PEP 621, setuptools backend). The dev tools (pytest, pytest-cov, hypothesis, mypy, ruff) form the `dev` dependency group, pinned by the committed `uv.lock`. The primary repository is on Codeberg; GitHub is a mirror.
 
 ## Commands
 
 ```bash
-make test                                            # python -m unittest discover -s ./tests -p '*_test.py'
-python -m unittest tests.numbers.positive_int_test   # one file
-python -m unittest tests.numbers.positive_int_test.TestPositiveIntValueObject.test_zero_value_raises_error  # one test
+make install                                         # uv sync: .venv with the dev group, as pinned by uv.lock
+make test                                            # uv run pytest
+uv run pytest tests/test_project.py                  # one file
+uv run pytest tests/test_project.py::test_warnings_are_errors   # one test; -k EXPR selects by name
+make check                                           # the default goal: lint, typecheck, then cov
+make lint                                            # ruff check + ruff format --check
+make format                                          # ruff check --fix + ruff format
+make typecheck                                       # mypy --strict on pyvalueobjects/
+make cov                                             # the suite with branch coverage
+make build                                           # sdist and wheel in dist/
+make clean                                           # removes build outputs and tool caches
 ```
 
-- Test files are named `*_test.py` (not `test_*.py`), so the `-p '*_test.py'` pattern is required; plain `python -m unittest` or default pytest discovery won't find them. Every test subdirectory needs an `__init__.py`.
-- There are no runtime dependencies (`requirements.txt` is empty), no linter/formatter config, and `make` / `make build` are no-ops.
-- CI (`.github/workflows/tests.yml`) runs `make test` on Python 3.9–3.13, so code must stay 3.9-compatible (e.g. `list[T]` / `X | None` annotations need `from __future__ import annotations`, as in `pyvalueobjects/lists/`).
+- pytest collects the new `test_*.py` modules and the 0.x unittest modules named `*_test.py`. Plain pytest discovery finds both patterns. Only `python -m unittest discover` needs `-p '*_test.py'`, plus `-t .` so that `tests/numbers` does not shadow the stdlib `numbers` module. Every test directory needs an `__init__.py`, so pytest imports its modules as `tests.<dir>.<module>`.
+- Warnings are errors. The one exception is a transitional filter for the invalid escape sequences in the legacy `cpe.py`.
+- ruff and strict mypy skip the 0.x code (`extend-exclude` for ruff, `exclude` plus `ignore_errors` overrides for mypy, all in `pyproject.toml`). New code must pass `make lint typecheck`. The coverage gate stays at 0 % until the 1.0 core lands.
+- CI (`.github/workflows/tests.yml`) runs `uv sync --locked` and `uv run pytest --cov` on Python 3.11–3.15, plus a quality job on 3.11 that runs lint and mypy, builds and `twine check`s the package, and installs the wheel alone. Code must stay 3.11-compatible. After changing dependencies, run `uv lock` and commit `uv.lock`.
+- `tests/test_project.py` checks these conventions (metadata, pytest settings, Makefile, CI, this file), so update it together with them.
 
 ## Architecture
 
@@ -40,4 +50,4 @@ Adding a value object touches: its module plus the `nullable_` counterpart, the 
 
 ## Tests
 
-Tests use `unittest`. Most suites set `self._cls` in `__init__` and cover hash/equality, `value()`, and error cases with `assertRaises(ValueObjectError, ...)`; nullable suites repeat the base suite and add a `None` case.
+The 0.x tests use `unittest` and run under pytest; new tests are plain pytest modules. Most 0.x suites set `self._cls` in `__init__` and cover hash/equality, `value()`, and error cases with `assertRaises(ValueObjectError, ...)`; nullable suites repeat the base suite and add a `None` case.
