@@ -21,7 +21,9 @@ from tests.test_core import CORE_SAMPLES
 
 # The modules whose __all__ the package root re-exports; each family joins when its names are exported.
 FAMILIES = ("_core",)
-EVAL_NS = {**vars(vo), "Decimal": decimal.Decimal, "datetime": datetime, "uuid": uuid, "ipaddress": ipaddress}
+# The public names only: the 0.x classes the root still re-exports outside __all__ must not shadow 1.0 classes.
+PUBLIC = {name: getattr(vo, name) for name in vo.__all__}
+EVAL_NS = {**PUBLIC, "Decimal": decimal.Decimal, "datetime": datetime, "uuid": uuid, "ipaddress": ipaddress}
 # The public value objects, plus the core's throwaway ones, so the contract runs before any family registers.
 CONTRACTED = [*SAMPLES, *CORE_SAMPLES]
 
@@ -36,8 +38,7 @@ def eval_ns(cls: type) -> dict[str, Any]:
 
 
 def test_every_public_value_object_has_samples() -> None:
-    exported = [getattr(vo, name) for name in vo.__all__]
-    public = {c for c in exported if isinstance(c, type) and issubclass(c, vo.ValueObject) and not c._abstract}
+    public = {c for c in PUBLIC.values() if isinstance(c, type) and issubclass(c, vo.ValueObject) and not c._abstract}
     assert public - {s.cls for s in SAMPLES} == set()
 
 
